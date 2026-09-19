@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "notesight"
+version = "0.1.0"
+description = "Turn an audio file into a rhythm-game chart (StepMania/DDR .sm + Beat Saber)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "RelentlessOldMan" }]
+keywords = [
+    "rhythm game", "beat saber", "stepmania", "ddr", "itg",
+    "auto-charter", "chart generator", "beatmap", "onset detection", "music",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Games/Entertainment",
+    "License :: OSI Approved :: MIT License",
+]
+
+# Core runtime. numpy/scipy = DSP; soundfile = wav/ogg/flac; imageio-ffmpeg bundles an
+# ffmpeg binary so mp3/m4a/aac decode with NO system ffmpeg install required.
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "soundfile>=0.11",
+    "imageio-ffmpeg>=0.4",
+]
+
+[project.optional-dependencies]
+view = ["ursina>=8.3", "panda3d>=1.10"]              # bs_visualizer.py (3D Beat Saber viewer + Note capture)
+dev  = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/RelentlessOldMan/NoteSight"
+Repository = "https://github.com/RelentlessOldMan/NoteSight"
+Issues = "https://github.com/RelentlessOldMan/NoteSight/issues"
+
+[project.scripts]
+notesight = "cli:main"
+
+[tool.setuptools]
+packages = ["notesight", "notesight.formats"]
+py-modules = ["cli"]                # the CLI entry point (audio file -> chart)
+include-package-data = true
+
+[tool.setuptools.package-data]
+# ship the mined pattern vocabulary + statistical models the generator loads at runtime
+"notesight.formats" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

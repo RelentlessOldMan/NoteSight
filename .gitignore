@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtualenv (bundled locally; recreate from README)
+.venv/
+
+# Generated output / scratch
+out/
+out_test/
+eval/_out/
+eval/_out_web/
+.uploads/
+*.npy
+chart_preview.png
+
+# Synth/test artifacts and any local audio (keep only original/royalty-free,
+# and don't commit copyrighted songs)
+clicktrack.wav
+*.mp3
+*.m4a
+*.wav
+*.ogg
+*.flac
+
+# ...EXCEPT the bundled royalty-free demo tracks under samples/ (small + shippable,
+# so the tool runs out of the box). Only original/royalty-free audio goes here.
+!samples/*.mp3
+!samples/*.m4a
+!samples/*.wav
+!samples/*.ogg
+!samples/*.flac
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# staged pack sources (audio, large)
+_sources/
+
+# PRIVATE pipeline -- personal build/publish scripts hardcoded to this machine
+# (deploy, release, zip, import/stage, jasper/mashup, stamina_pack, studio). They run
+# from the repo root and import the PUBLIC engine/builders via a sys.path shim. Not shipped.
+/local/
+
+# Analysis cache + scratch
+_cache/
+*.egg
+feedback/
+.sabersight.json
+_mashup/
+
+# curated corpus (other people's map charts -- analyze locally, never commit)
+_corpus_good/
+_corpus_incoming/
+_corpus_quality.txt
+
+# corpus-derived analysis scratch (regenerate via bs_mine_*.py; the runtime BANKS +
+# bs_transitions.json under notesight/formats/ ARE committed, these reports are not)
+doubles_valid.txt
+doubles_impossible.txt
+note_transitions.txt
+/bs_transitions.json
