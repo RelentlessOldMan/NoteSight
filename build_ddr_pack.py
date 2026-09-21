@@ -193,7 +193,8 @@ def save_png(src: str, dst: str) -> None:
 
 
 def render_tier(analysis, preset: str, slot: str, bpm, beat0, duration):
-    """Chart one difficulty off a shared analysis -> (meter, radar, body_str)."""
+    """Chart one difficulty -> (meter, radar, body_str, steps, nps). steps/nps are the
+    FINAL .sm step count and its density over the note span (what actually plays)."""
     # Let the difficulty preset drive the rhythm ceiling (grid + triplets), so
     # easy tiers stay on-beat (1/4, 1/8) and finer rhythms unlock as it climbs.
     d = DIFFICULTIES[preset]
@@ -206,7 +207,11 @@ def render_tier(analysis, preset: str, slot: str, bpm, beat0, duration):
     meter = predict_meter(radar, slot)
     body = notes_to_measures(r.notes, bpm, beat0,
                              spec.max_subdivision, spec.allow_triplets)
-    return meter, radar, body, len(r.notes)
+    steps = sum(1 for ln in body.replace(",", "\n").splitlines()
+                if set(ln.strip()) & {"1", "2", "4"})   # rows with a tap/hold-head/roll (a "step")
+    span = (r.notes[-1].time - r.notes[0].time) if len(r.notes) >= 2 else (duration or 1.0)
+    nps = steps / span if span > 0 else 0.0
+    return meter, radar, body, steps, nps
 
 
 def _to_mp3(src: str, dst: str, bitrate: str = "192k") -> bool:
@@ -273,21 +278,33 @@ def build_song(audio_path: str, out_group: str, title_override: str = "",
     print(f"  {duration:.1f}s | {len(analysis.onsets)} onsets | "
           f"BPM {bpm:.2f} | offset {-beat0:+.3f}")
 
+    # Render every tier, then DROP any TOP tier that can't reach ~90% of its target
+    # density. On onset-sparse songs the highest tiers cap out at the same note count
+    # (a "Challenge" that's really just a second Hard) -- omit it rather than ship a
+    # misleading difficulty. Only trailing top tiers drop; the lowest is always kept.
+    KEEP_FRAC = 0.90
+    rendered = [(preset, slot, *render_tier(analysis, preset, slot, bpm, beat0, duration))
+                for preset, slot in DDR_TIERS]
+    keep = [True] * len(rendered)
+    for i in range(len(rendered) - 1, 0, -1):          # top-down; never drop the lowest tier
+        if rendered[i][6] < KEEP_FRAC * DIFFICULTIES[rendered[i][0]].target_nps:
+            keep[i] = False
+        else:
+            break                                       # first tier that makes target -> stop
     blocks = []
-    for preset, slot in DDR_TIERS:
-        meter, radar, body, n = render_tier(analysis, preset, slot,
-                                             bpm, beat0, duration)
-        print(f"    {slot:<10} meter {meter:>2}  {n:>4} notes  "
-              f"(str {radar.stream:.2f} air {radar.air:.2f} chaos {radar.chaos:.2f})")
-        blocks.append(
-            "#NOTES:\n"
-            "     dance-single:\n"
-            "     NoteSight:\n"
-            f"     {slot}:\n"
-            f"     {meter}:\n"
-            f"     {radar.sm_field()}:\n"
-            f"{body};\n"
-        )
+    for (preset, slot, meter, radar, body, steps, nps), k in zip(rendered, keep):
+        print(f"    {slot:<10} meter {meter:>2}  {steps:>4} steps  {nps:4.2f} nps"
+              + ("" if k else "   [omit: onset-limited]"))
+        if k:
+            blocks.append(
+                "#NOTES:\n"
+                "     dance-single:\n"
+                "     NoteSight:\n"
+                f"     {slot}:\n"
+                f"     {meter}:\n"
+                f"     {radar.sm_field()}:\n"
+                f"{body};\n"
+            )
 
     # --- assemble the song folder ---
     safe = _sanitize(title)
