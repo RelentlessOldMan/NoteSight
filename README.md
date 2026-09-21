@@ -198,9 +198,7 @@ export writes a real `#OFFSET` and snaps notes to the grid. On steady-BPM songs
 
 ## Contributing
 
-Run the tests with `pip install -e ".[dev]" && pytest`. New output formats only
-need to implement the `ChartFormat` ABC in `notesight/formats/base.py` and
-register in `notesight/formats/__init__.py` — nothing upstream changes.
+This is a personal tool, published as-is — **issues and pull requests aren't accepted** (PRs auto-close). Fork it and make it your own. 🎮
 
 ## Legal
 
