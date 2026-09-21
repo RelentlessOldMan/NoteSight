@@ -98,10 +98,25 @@ def cached_grid_energy(audio_path: str):
     return result
 
 # All five difficulties, in the order StepMania lists them. (preset, slot).
+# NOTE: this is the SHARED ladder that build_bs_pack (Beat Saber) also imports --
+# do not change it for a DDR-only tweak. The DDR regular pack uses DDR_TIERS below.
 TIERS = [
     ("beginner", "Beginner"),
     ("easy", "Easy"),
     ("medium", "Medium"),
+    ("hard", "Hard"),
+    ("expert", "Challenge"),
+]
+
+# DDR/ITG REGULAR-song ladder (build_ddr_pack only). Beginner is dropped and a NEW
+# tier ("midhard") is inserted between the old Medium and Hard. The four kept tiers
+# reuse their EXACT presets, so their charts are identical to before -- only the
+# StepMania slot LABEL shifts down one (old Easy->Beginner, old Medium->Easy, new
+# midhard->Medium, Hard/Challenge unchanged).
+DDR_TIERS = [
+    ("easy", "Beginner"),
+    ("medium", "Easy"),
+    ("midhard", "Medium"),
     ("hard", "Hard"),
     ("expert", "Challenge"),
 ]
@@ -259,7 +274,7 @@ def build_song(audio_path: str, out_group: str, title_override: str = "",
           f"BPM {bpm:.2f} | offset {-beat0:+.3f}")
 
     blocks = []
-    for preset, slot in TIERS:
+    for preset, slot in DDR_TIERS:
         meter, radar, body, n = render_tier(analysis, preset, slot,
                                              bpm, beat0, duration)
         print(f"    {slot:<10} meter {meter:>2}  {n:>4} notes  "

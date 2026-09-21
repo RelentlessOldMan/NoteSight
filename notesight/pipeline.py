@@ -26,7 +26,7 @@ from .formats.stepmania import Note, map_to_lanes, snap_times
 
 # Difficulty preset name -> ITG PredictMeter difficulty slot.
 _SLOT = {"beginner": "Beginner", "easy": "Easy", "medium": "Medium",
-         "hard": "Hard", "expert": "Challenge"}
+         "midhard": "Medium", "hard": "Hard", "expert": "Challenge"}
 
 
 @dataclass
@@ -96,14 +96,26 @@ def analyze_audio(mono, sr: int, lrc_path: str = None) -> Analysis:
                     energy_times=e_times, energy=e, structure=structure)
 
 
-def build_chart(spec: ChartSpec, analysis: Analysis) -> ChartResult:
-    """Turn cached analysis into a chart under the given spec. Fast (no DSP)."""
-    diff = spec.resolved_difficulty()
-    bpm = spec.bpm if spec.bpm else analysis.grid.bpm
-    beat0 = analysis.grid.beat0
+def _grid_dedupe(onsets, bpm, beat0, max_subdivision):
+    """Collapse onsets that would quantize into the SAME grid cell down to one (the
+    strongest), so the selected note count survives snap_times -- i.e. a coarse-grid
+    tier's final step count still hits target_nps instead of bleeding merged notes.
+    Cell resolution = the tier's finest grid (max_subdivision lines per measure)."""
+    if bpm <= 0 or not onsets:
+        return list(onsets)
+    cells_per_beat = max_subdivision / 4.0     # sub 8 -> 2 (8ths), sub 16 -> 4 (16ths)
+    best = {}
+    for o in onsets:
+        k = round((o.time - beat0) * bpm / 60.0 * cells_per_beat)
+        cur = best.get(k)
+        if cur is None or o.strength > cur.strength:
+            best[k] = o
+    return sorted(best.values(), key=lambda o: o.time)
 
-    selected = select(analysis.onsets, diff,
-                      analysis.energy_times, analysis.energy)
+
+def _assemble_notes(spec, analysis, diff, bpm, beat0, onsets):
+    """One full note pass: select -> lanes -> holds -> chorus reuse -> sanitize."""
+    selected = select(onsets, diff, analysis.energy_times, analysis.energy)
     notes = map_to_lanes(selected, diff)
     # Sustained notes sitting on a long gap become holds (freeze arrows).
     if analysis.energy is not None:
@@ -112,11 +124,58 @@ def build_chart(spec: ChartSpec, analysis: Analysis) -> ChartResult:
     # Lock repeated sections together: stamp each repeat bar with an exact,
     # bar-aligned copy of its source bar (recognizable + consistent colors).
     if analysis.structure:
-        notes = apply_structure(notes, analysis.structure,
-                                analysis.grid.bpm, beat0)
-    # Ensure no hold overlaps the next note in its lane (avoids invalid,
-    # unclosed holds after the hold + structure passes).
+        notes = apply_structure(notes, analysis.structure, analysis.grid.bpm, beat0)
+    # No hold may overlap the next note in its lane (avoids invalid unclosed holds).
     sanitize_holds(notes)
+    return notes
+
+
+def _step_count(notes, bpm, beat0, sub, trip):
+    """Distinct quantize rows == the step count the .sm will actually have."""
+    return len(set(round(t, 4) for t in
+                   snap_times([n.time for n in notes], bpm, beat0, sub, trip)))
+
+
+def build_chart(spec: ChartSpec, analysis: Analysis) -> ChartResult:
+    """Turn cached analysis into a chart under the given spec. Fast (no DSP)."""
+    diff = spec.resolved_difficulty()
+    bpm = spec.bpm if spec.bpm else analysis.grid.bpm
+    beat0 = analysis.grid.beat0
+
+    # Grid-aware selection (DDR/backfill tiers): dedupe onsets to the quantize grid FIRST
+    # so target_count == surviving steps after snap -- keeps the .sm density on target
+    # instead of losing coarse-grid merges. BS (backfill off) selects from raw onsets.
+    onsets = _grid_dedupe(analysis.onsets, bpm, beat0, spec.max_subdivision) \
+        if diff.backfill else analysis.onsets
+
+    notes = _assemble_notes(spec, analysis, diff, bpm, beat0, onsets)
+    if diff.backfill:
+        # Chorus reuse (apply_structure) copies the sparsest chorus over its denser repeats,
+        # dragging the FINAL step count below target on repeat-heavy songs. So measure the
+        # real post-snap step count and, if short, re-select DENSER and rebuild -- the reused
+        # pattern just gets denser (still identical across repeats) until the played density
+        # lands on target. Onset-limited songs plateau and stop early.
+        span = (analysis.onsets[-1].time - analysis.onsets[0].time
+                if len(analysis.onsets) >= 2 else analysis.duration)
+        target_steps = max(1, round(diff.target_nps * span))
+        sub, trip = spec.max_subdivision, spec.allow_triplets
+        eff = diff.target_nps
+        steps = _step_count(notes, bpm, beat0, sub, trip)
+        best, best_err = notes, abs(steps - target_steps)
+        for _ in range(4):
+            if best_err <= 0.03 * target_steps:      # close enough
+                break
+            eff *= target_steps / max(steps, 1)      # nudge toward target (up OR down)
+            cand = _assemble_notes(spec, analysis, replace(diff, target_nps=eff),
+                                   bpm, beat0, onsets)
+            csteps = _step_count(cand, bpm, beat0, sub, trip)
+            if abs(csteps - target_steps) < best_err:
+                best, best_err = cand, abs(csteps - target_steps)
+            if csteps <= steps and eff > diff.target_nps:   # scaling up but stuck = onset-limited
+                break
+            steps = csteps
+        notes = best
+
     # Radar reflects what actually EXPORTS: compute it from the snapped times so
     # a subdivision cap (e.g. 8ths-only) shows up as lower Chaos and meter.
     # Carry each note's duration so holds populate the Freeze radar value.

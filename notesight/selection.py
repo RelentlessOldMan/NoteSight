@@ -29,6 +29,7 @@ ENERGY_WEIGHT = 0.55   # how strongly loud/exciting passages attract notes
 DENS_WEIGHT = 0.2      # secondary: keep dense onset runs from being thinned
 FLOOR_FRAC = 0.72      # a loud burst may pack to this fraction of min_interval
 REST_STRETCH = 1.5     # a quiet passage must space to this multiple of it
+ABS_FLOOR = 0.07       # hard min seconds between two notes (backfill never goes below this)
 
 
 def _e_at(e_times, energy, times):
@@ -89,6 +90,40 @@ def _select_offline(onsets: list[OnsetEvent], diff: Difficulty,
         bisect.insort(placed, t)
         keep[i] = True
         n += 1
+
+    # DDR presets backfill to hit target_nps exactly (consistent density across songs); Beat
+    # Saber leaves diff.backfill False (its targets are pre-compensated) so it stops here.
+    if not diff.backfill:
+        return [ev[i] for i in range(len(ev)) if keep[i]]
+
+    # BACKFILL to target_count. The energy floor can starve the average below target on
+    # dense / high-contrast songs (loud parts pack out at the floor, quiet parts get
+    # stretched), so a tier lands well under target_nps AND its density drifts song to song.
+    # Add the strongest still-unplaced onsets with a progressively tighter UNIFORM floor --
+    # down to an absolute playability minimum -- until we reach target_count. peak_nps still
+    # caps every 1s burst, so this fills toward the target average without exceeding the
+    # tier's ceiling. Net: each tier reliably hits target_nps and stays consistent across
+    # songs (only genuinely onset-sparse songs fall short, which is correct).
+    for mult in (0.6, 0.45, 0.3):
+        if n >= target_count:
+            break
+        fl = max(ABS_FLOOR, mi * mult)
+        for i in order:
+            if n >= target_count:
+                break
+            if keep[i]:
+                continue
+            t = times[i]
+            j = bisect.bisect_left(placed, t)
+            near = min((abs(t - placed[k]) for k in (j - 1, j) if 0 <= k < len(placed)),
+                       default=1e9)
+            if near < fl:
+                continue
+            if diff.peak_nps < 90 and _would_exceed_peak(placed, t, diff.peak_nps):
+                continue
+            bisect.insort(placed, t)
+            keep[i] = True
+            n += 1
     return [ev[i] for i in range(len(ev)) if keep[i]]
 
 

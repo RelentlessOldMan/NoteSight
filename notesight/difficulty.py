@@ -41,6 +41,11 @@ class Difficulty:
     # doesn't set it is unaffected). Real DDR (A20/Won't Stop) peak medians are Medium 6 /
     # Hard 9 / Challenge 13; we run BELOW that on purpose (user chose approachability).
     peak_nps: float = 99.0
+    # BACKFILL: after the burst/rest pass, relax the spacing floor to HIT target_nps exactly
+    # (so a tier's density is consistent song-to-song instead of drifting low on dense/contrasty
+    # songs). DDR presets set this True. Beat Saber leaves it False -- its target_nps are
+    # pre-compensated for the undershoot, so backfilling would double-count and over-densify.
+    backfill: bool = False
 
 
 # Calibrated to hand-authored DDR A20 charts: triplets are ~never
@@ -54,9 +59,16 @@ class Difficulty:
 # Beginner/Easy are naturally below their caps. (Real DDR runs 6/9/13 -- we're gentler.)
 DIFFICULTIES = {
     #                     name        min_iv  nps  jumps meter  sub  trip  jstr  jgap  peak
-    "beginner": Difficulty("Beginner", 0.50, 1.2, True,  2,      4, False, 0.76, 2.0, peak_nps=3),
-    "easy":     Difficulty("Easy",     0.34, 2.2, True,  4,      8, False, 0.70, 1.5, peak_nps=4),
-    "medium":   Difficulty("Medium",   0.20, 3.2, True,  6,      8, False, 0.65, 1.0, peak_nps=5),
-    "hard":     Difficulty("Hard",     0.13, 4.0, True,  9,     16, False, 0.60, 0.7, peak_nps=6),
-    "expert":   Difficulty("Expert",   0.09, 5.0, True,  12,    16, False, 0.60, 0.6, peak_nps=7),
+    "beginner": Difficulty("Beginner", 0.50, 1.2, True,  2,      4, False, 0.76, 2.0, peak_nps=3, backfill=True),
+    # DDR regular-song ladder (via DDR_TIERS in build_ddr_pack): the slot each preset maps to
+    # and its target NPS are -- easy->Beginner 2.0, medium->Easy 2.5, midhard->Medium 3.0,
+    # hard->Hard 3.5, expert->Challenge 4.0. backfill=True makes each HIT its target exactly.
+    "easy":     Difficulty("Easy",     0.34, 2.0, True,  4,      8, False, 0.70, 1.5, peak_nps=4, backfill=True),
+    "medium":   Difficulty("Medium",   0.20, 2.5, True,  6,      8, False, 0.65, 1.0, peak_nps=5, backfill=True),
+    # a NEW tier sitting between Medium and Hard (fills the biggest density gap on the
+    # DDR ladder). Params interpolated Medium<->Hard. Used only by build_ddr_pack's
+    # DDR_TIERS (regular .sm songs); not part of the Beat Saber or stamina ladders.
+    "midhard":  Difficulty("Medium",   0.16, 3.0, True,  7,      8, False, 0.62, 0.85, peak_nps=6, backfill=True),
+    "hard":     Difficulty("Hard",     0.13, 3.5, True,  9,     16, False, 0.60, 0.7, peak_nps=6, backfill=True),
+    "expert":   Difficulty("Expert",   0.09, 4.0, True,  12,    16, False, 0.60, 0.6, peak_nps=7, backfill=True),
 }
