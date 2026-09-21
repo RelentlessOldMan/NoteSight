@@ -209,4 +209,4 @@ just don't distribute charts of copyrighted songs or another game's assets.
 
 ## License
 
-[MIT](LICENSE) © 2026 RelentlessOldMan
+MIT — see [LICENSE](LICENSE). © 2026 RelentlessOldMan.
