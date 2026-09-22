@@ -146,3 +146,72 @@ def select(onsets: list[OnsetEvent], difficulty: Difficulty,
     """Pick which onsets become notes. The energy envelope (optional) steers
     WHERE density concentrates (bursts in loud passages, rests in calm ones)."""
     return _select_offline(onsets, difficulty, e_times, energy)
+
+
+def stream_fill(selected: list[OnsetEvent], all_onsets: list[OnsetEvent],
+                diff: Difficulty, bpm: float, beat0: float,
+                e_times=None, energy=None) -> list[OnsetEvent]:
+    """PRO tiers only: add synthetic grid-aligned notes in the HOTTEST passages so a
+    tier can climb past the song's real onset ceiling (a human streaming 16ths
+    through a drop). Onset selection runs first; this tops it up toward target_nps.
+
+    The gate is the tier's energy PERCENTILE -- fill never fires in calm passages, so
+    the loud/quiet contrast survives. Candidates land on the beat subdivision grid,
+    skip any cell already covered by a selected note (anchors stay), and are added
+    HOTTEST-first until target_count is hit, honoring the spacing floor + peak cap.
+    Filled notes get LOW strength (the jump pass skips them -> streams stay
+    single-note rolls) and a brightness interpolated from the real onsets (so the
+    voicer's pitch bias still shapes the run). Returns selected + synthetic, sorted.
+    """
+    if not diff.stream_fill or bpm <= 0 or len(selected) < 2:
+        return selected
+    if e_times is None or energy is None or len(energy) == 0:
+        return selected  # no envelope -> can't gate -> never blind-fill
+    times = sorted(o.time for o in selected)
+    span = times[-1] - times[0]
+    if span <= 0:
+        return selected
+    target = max(1, round(diff.target_nps * span))
+    if len(selected) >= target:
+        return selected
+
+    energy_arr = np.asarray(energy, dtype=float)
+    thresh = float(np.percentile(energy_arr, diff.stream_energy_pct * 100.0))
+    on_t = [o.time for o in all_onsets] or times
+    on_b = [o.brightness for o in all_onsets] or [0.0] * len(times)
+
+    step = 60.0 / bpm / (diff.stream_grid / 4.0)   # seconds per subdivision cell
+    # Occupancy is by GRID CELL, not time distance: an anchor holds the cell it will
+    # SNAP to (round to nearest cell), so a fill one cell over lands on a distinct row
+    # even when the anchor sits slightly off-grid. (A time-distance floor wrongly kills
+    # those adjacent cells and starves the stream below the grid's capacity.)
+    occupied = {int(round((t - beat0) / step)) for t in times}
+    placed = list(times)                            # for the peak-cap window check
+    t0, t1 = times[0], times[-1]
+    k0 = int(np.ceil((t0 - beat0) / step))
+    k1 = int(np.floor((t1 - beat0) / step))
+    cands = []
+    for k in range(k0, k1 + 1):
+        if k in occupied:
+            continue
+        t = beat0 + k * step
+        e = float(np.interp(t, e_times, energy))
+        if e >= thresh:
+            cands.append((e, k, t))
+    cands.sort(key=lambda c: c[0], reverse=True)    # hottest first
+
+    synth: list[OnsetEvent] = []
+    n = len(placed)
+    for e, k, t in cands:
+        if n >= target:
+            break
+        if diff.peak_nps < 90 and _would_exceed_peak(placed, t, diff.peak_nps):
+            continue
+        bisect.insort(placed, t)
+        occupied.add(k)
+        synth.append(OnsetEvent(time=t, strength=0.3,
+                                brightness=float(np.interp(t, on_t, on_b))))
+        n += 1
+    if not synth:
+        return selected
+    return sorted(list(selected) + synth, key=lambda o: o.time)

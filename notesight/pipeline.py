@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 
 from .onsets import OnsetEvent, detect_onsets, energy_envelope
 from .difficulty import DIFFICULTIES, Difficulty
-from .selection import select
+from .selection import select, stream_fill
 from .beatgrid import BeatGrid, estimate_grid
 from .radar import Radar, compute_radar, predict_meter
 from .holds import apply_holds, sanitize_holds
@@ -114,8 +114,12 @@ def _grid_dedupe(onsets, bpm, beat0, max_subdivision):
 
 
 def _assemble_notes(spec, analysis, diff, bpm, beat0, onsets):
-    """One full note pass: select -> lanes -> holds -> chorus reuse -> sanitize."""
+    """One full note pass: select -> (stream-fill) -> lanes -> holds -> reuse -> sanitize."""
     selected = select(onsets, diff, analysis.energy_times, analysis.energy)
+    # PRO tiers: top up past the onset ceiling with grid-aligned notes in hot passages.
+    if diff.stream_fill:
+        selected = stream_fill(selected, onsets, diff, bpm, beat0,
+                               analysis.energy_times, analysis.energy)
     notes = map_to_lanes(selected, diff)
     # Sustained notes sitting on a long gap become holds (freeze arrows).
     if analysis.energy is not None:
@@ -123,7 +127,11 @@ def _assemble_notes(spec, analysis, diff, bpm, beat0, onsets):
                     analysis.energy, bpm, beat0, analysis.duration)
     # Lock repeated sections together: stamp each repeat bar with an exact,
     # bar-aligned copy of its source bar (recognizable + consistent colors).
-    if analysis.structure:
+    # SKIP for stream-fill (pro) tiers: chorus reuse copies the SPARSEST chorus over
+    # its repeats, which flattens exactly the loud choruses where stream-fill just
+    # added the density -- and the energy-driven streams already come out near-
+    # identical across repeats, so recognizability barely suffers.
+    if analysis.structure and not diff.stream_fill:
         notes = apply_structure(notes, analysis.structure, analysis.grid.bpm, beat0)
     # No hold may overlap the next note in its lane (avoids invalid unclosed holds).
     sanitize_holds(notes)

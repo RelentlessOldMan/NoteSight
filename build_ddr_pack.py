@@ -32,9 +32,14 @@ import subprocess
 import sys
 
 from notesight import ChartSpec, DIFFICULTIES, analyze_audio, build_chart
+from notesight.difficulty import PRO_DIFFICULTIES
 from notesight.audio_io import load_audio
 from notesight.radar import compute_radar, predict_meter
 from notesight.formats.stepmania import Note, notes_to_measures, _sanitize
+
+# Every preset by name (regular ladder + the pro-pack ladder), so a tier can be
+# resolved regardless of which pack it belongs to.
+ALL_DIFFS = {**DIFFICULTIES, **PRO_DIFFICULTIES}
 
 # The DSP analysis (onsets/grid/energy/structure) is deterministic per audio file
 # but SLOW; cache it on disk so charter-only rebuilds skip it entirely. Bump
@@ -121,6 +126,19 @@ DDR_TIERS = [
     ("expert", "Challenge"),
 ]
 
+# PRO pack ladder (--pro): a SEPARATE, harder pack that climbs above the regular one.
+# The floor (Beginner slot) is the regular pack's top tier ("expert", 4.0 nps) VERBATIM;
+# the four tiers above it push to 5.5 / 7.0 / 8.5 / 9.0 -- pro2 stays onset-honest, and
+# pro3/pro4/pro5 stream-fill the loud passages to reach tech-map density. Songs too sparse
+# (or too low-BPM for a clean 16th stream) to reach a top tier just drop it (omit-top-tier).
+PRO_DDR_TIERS = [
+    ("expert", "Beginner"),
+    ("pro2", "Easy"),
+    ("pro3", "Medium"),
+    ("pro4", "Hard"),
+    ("pro5", "Challenge"),
+]
+
 AUDIO_EXTS = (".wav", ".ogg", ".flac", ".mp3", ".m4a")
 ART_PREFS = (" - source.png", " - ai-01.png", " - thumbnail.jpg",
              " - yt-thumb.png", ".png", ".jpg")
@@ -197,8 +215,10 @@ def render_tier(analysis, preset: str, slot: str, bpm, beat0, duration):
     FINAL .sm step count and its density over the note span (what actually plays)."""
     # Let the difficulty preset drive the rhythm ceiling (grid + triplets), so
     # easy tiers stay on-beat (1/4, 1/8) and finer rhythms unlock as it climbs.
-    d = DIFFICULTIES[preset]
-    spec = ChartSpec(difficulty=preset,
+    # diff_override carries the resolved preset (so pro-ladder presets, which live
+    # outside DIFFICULTIES, chart with their own density instead of falling back).
+    d = ALL_DIFFS[preset]
+    spec = ChartSpec(difficulty=preset, diff_override=d,
                      max_subdivision=d.max_subdivision,
                      allow_triplets=d.allow_triplets)
     r = build_chart(spec, analysis)
@@ -266,10 +286,12 @@ def _existing_audio(song_dir: str, safe: str) -> str:
 
 
 def build_song(audio_path: str, out_group: str, title_override: str = "",
-               sm_only: bool = False) -> str:
+               sm_only: bool = False, pro: bool = False) -> str:
     folder = os.path.dirname(audio_path)
     stem = os.path.splitext(os.path.basename(audio_path))[0]
     title = title_override or stem
+    if pro:
+        title += " (Pro)"      # coexists with the regular chart in the same install
     artist = artist_of(folder, audio_path)
 
     print(f"\n=== {title}  [{artist}] ===")
@@ -283,11 +305,12 @@ def build_song(audio_path: str, out_group: str, title_override: str = "",
     # (a "Challenge" that's really just a second Hard) -- omit it rather than ship a
     # misleading difficulty. Only trailing top tiers drop; the lowest is always kept.
     KEEP_FRAC = 0.90
+    tiers = PRO_DDR_TIERS if pro else DDR_TIERS
     rendered = [(preset, slot, *render_tier(analysis, preset, slot, bpm, beat0, duration))
-                for preset, slot in DDR_TIERS]
+                for preset, slot in tiers]
     keep = [True] * len(rendered)
     for i in range(len(rendered) - 1, 0, -1):          # top-down; never drop the lowest tier
-        if rendered[i][6] < KEEP_FRAC * DIFFICULTIES[rendered[i][0]].target_nps:
+        if rendered[i][6] < KEEP_FRAC * ALL_DIFFS[rendered[i][0]].target_nps:
             keep[i] = False
         else:
             break                                       # first tier that makes target -> stop
@@ -405,8 +428,10 @@ def main(argv=None) -> int:
         print(__doc__)
         return 2
     # --sm-only: regen charts in place (reuse on-disk audio/art, rewrite only .sm)
+    # --pro: build the harder PRO ladder (4.0/5.5/7.0/8.5/9.0), titles get " (Pro)"
     sm_only = "--sm-only" in argv
-    rest = [a for a in argv if a != "--sm-only"]
+    pro = "--pro" in argv
+    rest = [a for a in argv if a not in ("--sm-only", "--pro")]
     out_group, song_args = rest[0], rest[1:]
     if not sm_only:
         os.makedirs(out_group, exist_ok=True)
@@ -419,7 +444,7 @@ def main(argv=None) -> int:
             print(f"!! skip (no audio found): {s}", file=sys.stderr)
             continue
         try:
-            build_song(audio, out_group, title, sm_only=sm_only)
+            build_song(audio, out_group, title, sm_only=sm_only, pro=pro)
             ok += 1
         except Exception as e:  # keep the batch going
             print(f"!! FAILED {s}: {e}", file=sys.stderr)
