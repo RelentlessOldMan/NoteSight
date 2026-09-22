@@ -100,7 +100,7 @@ def _loop_unit(data, sr, loop_dur):
 def build_song(audio_path, ddr_dir, bs_dir):
     folder = os.path.dirname(audio_path)
     stem = os.path.splitext(os.path.basename(audio_path))[0]
-    title = f"{stem} - Gauntlet"
+    title = f"ROM Gauntlet - {stem}"   # prefix so all gauntlet songs group together in the song list
     artist = artist_of(folder, audio_path)
     print(f"\n=== {title}  [{artist}] ===")
 

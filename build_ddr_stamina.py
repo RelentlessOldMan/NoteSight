@@ -64,7 +64,7 @@ def one_play_ddr(audio_path):
 def build_song(audio_path, out_dir, minutes):
     folder = os.path.dirname(audio_path)
     stem = os.path.splitext(os.path.basename(audio_path))[0]
-    title = f"{stem} {minutes} Min"
+    title = f"ROM Stamina - {stem}"   # prefix so all stamina songs group together in the song list
     artist = artist_of(folder, audio_path)
     print(f"\n=== {title}  [{artist}] ===")
 

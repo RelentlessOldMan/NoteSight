@@ -152,17 +152,17 @@ def stitch_bs_mashup_stamina():
         # (benign resolution + validate) -- NOT the old mutating guard.
         stitched[slot] = guard_seams(stitched[slot], NOMINAL_BPM, None)
 
-    ms_dir = os.path.join(BS_PACK, f"{TITLE} - Stamina")
+    ms_dir = os.path.join(BS_PACK, f"ROM Stamina - {TITLE}")
     os.makedirs(ms_dir, exist_ok=True)
     _write_looped_egg(np.concatenate(units), sr, 1, os.path.join(ms_dir, "song.egg"))
-    meta = SongMeta(title=f"{TITLE} - Stamina", artist=ARTIST, audio_path="",
+    meta = SongMeta(title=f"ROM Stamina - {TITLE}", artist=ARTIST, audio_path="",
                     bpm=NOMINAL_BPM, beat0=0.0, duration=off)
     write_pack(stitched, meta, BS_PACK, cover_src="", note_opts={"raw": True})
 
     rep = ["NoteSight generation report",
            f"generator: Beat Saber  {BS_GEN_VERSION}",
            f"generated: {build_timestamp()}",
-           f"song: {TITLE} - Stamina",
+           f"song: ROM Stamina - {TITLE}",
            f"total {off / 60:.1f} min  ({len(marks)} songs stitched end-to-end)",
            "NOTE: the individual per-song Stamina charts concatenated (one play each),",
            "NOT a fresh generation over the mashup audio.", "",
@@ -245,10 +245,10 @@ def stitch_ddr_mashup_stamina():
         blocks.append("#NOTES:\n     dance-single:\n     NoteSight:\n"
                       f"     {slot}:\n     {meter}:\n     {radar.sm_field()}:\n{body};\n")
 
-    safe = f"{TITLE} - Stamina"
+    safe = f"ROM Stamina - {TITLE}"
     song_dir = os.path.join(DDR_PACK, safe)
     os.makedirs(song_dir, exist_ok=True)
-    music = f"{TITLE} - Stamina.ogg"
+    music = f"ROM Stamina - {TITLE}.ogg"
     with sf.SoundFile(os.path.join(song_dir, music), "w", samplerate=sr, channels=2,
                       format="OGG", subtype="VORBIS") as out:
         for i in range(0, len(buf), 65536):
@@ -264,7 +264,7 @@ def stitch_ddr_mashup_stamina():
     rep = ["NoteSight generation report",
            f"generator: ITG / StepMania  {ITG_GEN_VERSION}",
            f"generated: {build_timestamp()}",
-           f"song: {TITLE} - Stamina",
+           f"song: ROM Stamina - {TITLE}",
            f"total {end / 60:.1f} min  ({len(songs)} songs stitched end-to-end)",
            "NOTE: the individual per-song Stamina charts concatenated (one play each),",
            "each kept at its OWN bpm via #BPMS -- NOT a fresh gen or a 120-quantize.", "",
@@ -323,7 +323,7 @@ def main(argv):
     print(f"== MASHUP GAUNTLET: {len(marks)} levels, {nps_lo:.1f} -> {nps_hi:.1f} NPS, "
           f"{len(notes)} notes, {song_dur / 60:.1f} min ==")
 
-    gtitle = f"{TITLE} Gauntlet"
+    gtitle = f"ROM Gauntlet - {TITLE}"
     safe = _sanitize(gtitle)
     # ---- Beat Saber ----
     bsong = os.path.join(BS_PACK, safe)

@@ -133,7 +133,7 @@ def one_play(audio_path):
 def build_song(audio_path, out_dir, minutes, label=""):
     folder = os.path.dirname(audio_path)
     stem = os.path.splitext(os.path.basename(audio_path))[0]
-    title = f"{stem} - Stamina" + (f" {label}" if label else "")  # label distinguishes
+    title = f"ROM Stamina - {stem}" + (f" {label}" if label else "")  # prefix groups them in the song list; label distinguishes
     artist = artist_of(folder, audio_path)               # e.g. "45" -> "Boogie - Stamina 45"
     print(f"\n=== {title}  [{artist}]  (Beat Saber) ===")
 
