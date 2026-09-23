@@ -41,13 +41,26 @@ class ChartSpec:
     #   the shared DIFFICULTIES[name] table -- lets Beat Saber run its own density
     #   ladder without disturbing the DDR-calibrated presets. The meter slot still
     #   comes from `difficulty` (name), so the two stay independent.
+    # --- user-adjustable knobs (public release): let someone re-roll or retarget a
+    # chart without touching the presets. seed varies every random choice (so a chart
+    # you don't like can be re-generated differently, and the same seed always
+    # reproduces the same chart); target_nps / peak_nps override the preset's density
+    # and burst ceiling for this run only.
+    seed: int = 0                    # RNG seed for voicing variety (0 = default)
+    target_nps: float | None = None  # override the preset's target notes/sec
+    peak_nps: float | None = None    # override the preset's busiest-1s ceiling
 
     def resolved_difficulty(self) -> Difficulty:
         base = self.diff_override or DIFFICULTIES.get(self.difficulty,
                                                       DIFFICULTIES["medium"])
-        if self.jumps is None:
-            return base
-        return replace(base, allow_jumps=self.jumps)
+        changes = {}
+        if self.jumps is not None:
+            changes["allow_jumps"] = self.jumps
+        if self.target_nps is not None:
+            changes["target_nps"] = self.target_nps
+        if self.peak_nps is not None:
+            changes["peak_nps"] = self.peak_nps
+        return replace(base, **changes) if changes else base
 
 
 @dataclass
@@ -120,7 +133,7 @@ def _assemble_notes(spec, analysis, diff, bpm, beat0, onsets):
     if diff.stream_fill:
         selected = stream_fill(selected, onsets, diff, bpm, beat0,
                                analysis.energy_times, analysis.energy)
-    notes = map_to_lanes(selected, diff)
+    notes = map_to_lanes(selected, diff, spec.seed)
     # Sustained notes sitting on a long gap become holds (freeze arrows).
     if analysis.energy is not None:
         apply_holds(notes, analysis.onsets, analysis.energy_times,

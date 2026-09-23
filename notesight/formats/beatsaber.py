@@ -125,7 +125,7 @@ def to_bs_notes(notes, bpm: float, beat0: float = 0.0,
                 flow_only: bool = False, double_rate: float = 0.0,
                 twohand_rate: float = 0.0, same_hand_run: float = 0.0,
                 max_run: int = 3, reset_gap: float = 2.0,
-                lr_rate: float = 0.0) -> list[dict]:
+                lr_rate: float = 0.0, seed: int = 0) -> list[dict]:
     """Translate NoteSight notes into Beat Saber `_notes` -- tuned from a real-map
     study + on-hands play feedback.
 
@@ -148,12 +148,17 @@ def to_bs_notes(notes, bpm: float, beat0: float = 0.0,
     the SAME hand instead of alternating (up to max_run in a row) -> same-saber
     strings/windmills. These are the stamina/gauntlet variety knobs.
     """
-    rng = random.Random(0x57ABE1 ^ len(notes))     # deterministic per chart
+    rng = random.Random(0x57ABE1 ^ len(notes) ^ (seed & 0x7FFFFFFF))   # deterministic per chart+seed
     parity = {RED: DOWN, BLUE: DOWN}
     last_pitch = {RED: 0.0, BLUE: 1.0}
     horiz_run = {RED: 0, BLUE: 0}
     horiz_gate = {RED: 0, BLUE: 0}
-    diag_gate = {RED: 0, BLUE: 0}
+    # diag_gate counts leaps and angles every DIAG_EVERY-th one; offsetting its phase by
+    # the seed shifts WHICH leaps become diagonal accents -> a different-but-equivalent
+    # chart (parity/flow untouched, only accent placement moves). This is what makes
+    # --seed re-roll a Beat Saber chart even though the core voicing is rule-based.
+    diag_gate = {RED: (seed & 0xFFFF) % DIAG_EVERY,
+                 BLUE: ((seed >> 3) + 1) % DIAG_EVERY}
     last_hand = BLUE
     run_len = 0
     last_beat = -1e9
@@ -478,13 +483,13 @@ def write_pack(notes_by_diff: dict, meta: SongMeta, out_dir: str,
         if use_raw:
             bs_notes = notes                    # already letter-voiced BS _notes dicts
         else:
-            bs_notes = to_bs_notes(notes, meta.bpm, meta.beat0, **note_opts)
+            bs_notes = to_bs_notes(notes, meta.bpm, meta.beat0, seed=meta.seed, **note_opts)
         # Embed the generator version in the map itself. JSON has no comments, so we
         # tag it as top-level metadata AND inside _customData (the canonical spot the
         # game/editors preserve for custom fields) -- both are ignored by play.
         dat = {"_version": "2.0.0", "_BPMChanges": [],
                "_generatorVersion": f"NoteSight BS {BS_GEN_VERSION}",
-               "_events": _lighting(bs_notes, seed=rank),
+               "_events": _lighting(bs_notes, seed=rank ^ (meta.seed & 0x7FFFFFFF)),
                "_notes": bs_notes, "_obstacles": [], "_bookmarks": [],
                "_customData": {"_generator": "NoteSight", "_generatorVersion": BS_GEN_VERSION}}
         with open(os.path.join(song_dir, dat_name), "w", encoding="utf-8") as f:

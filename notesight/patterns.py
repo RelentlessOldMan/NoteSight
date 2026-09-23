@@ -141,8 +141,13 @@ def _gen_motif(phrase, lo: float, rng: float, start_foot: int,
     return lanes
 
 
-def assign(onsets: list[OnsetEvent], diff: Difficulty):
-    """Assign 4-panel lanes to selected onsets. Returns (time, lane, strength)."""
+def assign(onsets: list[OnsetEvent], diff: Difficulty, seed: int = 0):
+    """Assign 4-panel lanes to selected onsets. Returns (time, lane, strength).
+
+    `seed` shifts which pad symmetry each phrase uses and which foot leads, so a
+    different seed yields a different-but-equally-valid chart (same flow, mirrored/
+    shifted arrows) -- lets a user re-roll a chart they don't like; the same seed
+    always reproduces the same chart."""
     if not onsets:
         return []
     ev = sorted(onsets, key=lambda o: o.time)
@@ -161,7 +166,7 @@ def assign(onsets: list[OnsetEvent], diff: Difficulty):
         # feet, new arrows -- which is how a good chart varies without getting
         # harder. The transform changes every couple phrases (motif, then its
         # mirror), matching "play it, small break, mirrored version next".
-        tf = TRANSFORMS[(pidx // 2) % len(TRANSFORMS)]
+        tf = TRANSFORMS[(pidx // 2 + seed) % len(TRANSFORMS)]
         sig = _signature(phrase, sig_eps)
         distinctive = len(phrase) >= 4 and len(set(sig)) > 1
         base = motifs.get(sig) if distinctive else None
@@ -172,7 +177,7 @@ def assign(onsets: list[OnsetEvent], diff: Difficulty):
             for i, v in enumerate(tf):
                 inv[v] = i
             avoid = inv[prev_emitted] if prev_emitted >= 0 else -1
-            base = _gen_motif(phrase, lo, rng, start_foot=pidx & 1,
+            base = _gen_motif(phrase, lo, rng, start_foot=(pidx + seed) & 1,
                               first_avoid=avoid)
             if distinctive:
                 motifs[sig] = base

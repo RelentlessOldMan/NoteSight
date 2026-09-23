@@ -61,6 +61,8 @@ box — see that folder's README for what each demonstrates.
 | `--lrc PATH` / `--no-lrc` | lyrics file for chorus-aware pattern reuse (auto-detects a sidecar `<audio>.lrc`) |
 | `--bpm` | override the auto-estimated tempo |
 | `--jumps` / `--no-jumps`, `--max-subdivision {4,8,16}`, `--no-triplets` | fine chart-shape control |
+| `--seed N` | re-roll: a different `N` gives a different-but-equivalent chart; the same `N` always reproduces the same chart |
+| `--nps F` / `--peak F` | override the difficulty's target notes/sec and its busiest-1-second ceiling |
 | `-o, --out`, `--title`, `--artist` | output dir + metadata |
 
 ### Lyrics → structure

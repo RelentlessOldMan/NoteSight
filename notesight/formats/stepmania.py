@@ -47,11 +47,12 @@ class Note:
     duration: float = 0.0  # >0 = hold note (freeze), seconds held before release
 
 
-def map_to_lanes(onsets: list[OnsetEvent], diff: Difficulty) -> list[Note]:
+def map_to_lanes(onsets: list[OnsetEvent], diff: Difficulty, seed: int = 0) -> list[Note]:
     """Assign 4-panel lanes to selected onsets via the music-driven pattern
-    engine (staircases/crossovers + motif reuse); jumps on strong hits."""
+    engine (staircases/crossovers + motif reuse); jumps on strong hits. `seed`
+    varies the symmetry/foot choices for a different-but-equivalent chart."""
     return [Note(time=t, lane=lane, strength=s)
-            for t, lane, s in assign_patterns(onsets, diff)]
+            for t, lane, s in assign_patterns(onsets, diff, seed)]
 
 
 # Line counts a whole measure may use, split by rhythmic family. Each measure

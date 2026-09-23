@@ -25,6 +25,7 @@ class SongMeta:
     difficulty: Difficulty | None = None
     max_subdivision: int = 48   # cap the finest quantize grid (8 = "8ths only")
     allow_triplets: bool = True
+    seed: int = 0               # RNG seed for format-side voicing variety (Beat Saber)
     extra: dict = field(default_factory=dict)
 
 

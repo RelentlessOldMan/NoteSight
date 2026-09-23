@@ -37,6 +37,14 @@ def main(argv=None) -> int:
                    help="disallow triplet measures")
     p.add_argument("--bpm", type=float, default=None,
                    help="override BPM (default: auto-estimate)")
+    # Adjustable knobs: re-roll or retarget without editing presets.
+    p.add_argument("--seed", type=int, default=0,
+                   help="RNG seed: change it to re-roll a different-but-equivalent "
+                        "chart; the same seed always reproduces the same chart")
+    p.add_argument("--nps", type=float, default=None, dest="target_nps",
+                   help="override the difficulty's target notes/sec (density)")
+    p.add_argument("--peak", type=float, default=None, dest="peak_nps",
+                   help="override the busiest-1-second note ceiling")
     p.add_argument("--lrc", default=None,
                    help="timestamped .lrc lyrics file; its chorus-repeat structure "
                         "guides pattern reuse (default: auto-detect a sidecar "
@@ -55,7 +63,9 @@ def main(argv=None) -> int:
     title = args.title or os.path.splitext(os.path.basename(args.audio))[0]
     spec = ChartSpec(difficulty=args.difficulty,
                      jumps=args.jumps, max_subdivision=args.max_subdivision,
-                     allow_triplets=args.allow_triplets, bpm=args.bpm)
+                     allow_triplets=args.allow_triplets, bpm=args.bpm,
+                     seed=args.seed, target_nps=args.target_nps,
+                     peak_nps=args.peak_nps)
 
     # Lyrics: explicit --lrc wins; --no-lrc ("") disables; otherwise auto-detect a
     # sidecar <audio>.lrc. A timestamped .lrc lets the chorus (where the words come
@@ -87,7 +97,7 @@ def main(argv=None) -> int:
                     bpm=r.bpm, beat0=r.beat0, duration=r.duration,
                     difficulty=spec.resolved_difficulty(),
                     max_subdivision=spec.max_subdivision,
-                    allow_triplets=spec.allow_triplets)
+                    allow_triplets=spec.allow_triplets, seed=args.seed)
     fmt = get_format(args.format)
     out_path = fmt.write(r.notes, meta, args.out)
     print(f"Wrote {out_path}")
