@@ -58,6 +58,12 @@ class Difficulty:
     # (0.65 = hottest 35%). Higher pro tiers lower this so more of the song streams.
     stream_energy_pct: float = 0.65
     stream_grid: int = 16         # subdivision the fill lands on (8 = 8ths, 16 = 16ths)
+    # DDR jump RUNS: max consecutive back-to-back jumps allowed (a "run"). 1 = isolated jumps
+    # only (the old behaviour). Hand charts grow this with difficulty (Beginner 1, Easy ~2,
+    # Medium ~3, Hard ~4) and it's FUN. The paired rule (in patterns.assign): a jump/run must
+    # EXIT into space -- never a tight single right after -- since that tight exit is the
+    # awkward "jump wedged in a stream" pattern hand charts almost never do.
+    max_jump_run: int = 1
 
 
 # Calibrated to hand-authored DDR A20 charts: triplets are ~never
@@ -75,14 +81,16 @@ DIFFICULTIES = {
     # DDR regular-song ladder (via DDR_TIERS in build_ddr_pack): the slot each preset maps to
     # and its target NPS are -- easy->Beginner 2.0, medium->Easy 2.5, midhard->Medium 3.0,
     # hard->Hard 3.5, expert->Challenge 4.0. backfill=True makes each HIT its target exactly.
-    "easy":     Difficulty("Easy",     0.34, 2.0, True,  4,      8, False, 0.70, 1.5, peak_nps=4, backfill=True),
-    "medium":   Difficulty("Medium",   0.20, 2.5, True,  6,      8, False, 0.65, 1.0, peak_nps=5, backfill=True),
+    # NOTE: max_jump_run is per DDR *slot* (DDR_TIERS maps preset->slot): easy->Beginner=1,
+    # medium->Easy=2, midhard->Medium=3, hard->Hard=4, expert->Challenge=4 (from hand-chart study).
+    "easy":     Difficulty("Easy",     0.34, 2.0, True,  4,      8, False, 0.70, 1.5, peak_nps=4, backfill=True, max_jump_run=1),
+    "medium":   Difficulty("Medium",   0.20, 2.5, True,  6,      8, False, 0.65, 1.0, peak_nps=5, backfill=True, max_jump_run=2),
     # a NEW tier sitting between Medium and Hard (fills the biggest density gap on the
     # DDR ladder). Params interpolated Medium<->Hard. Used only by build_ddr_pack's
     # DDR_TIERS (regular .sm songs); not part of the Beat Saber or stamina ladders.
-    "midhard":  Difficulty("Medium",   0.16, 3.0, True,  7,      8, False, 0.62, 0.85, peak_nps=6, backfill=True),
-    "hard":     Difficulty("Hard",     0.13, 3.5, True,  9,     16, False, 0.60, 0.7, peak_nps=6, backfill=True),
-    "expert":   Difficulty("Expert",   0.09, 4.0, True,  12,    16, False, 0.60, 0.6, peak_nps=7, backfill=True),
+    "midhard":  Difficulty("Medium",   0.16, 3.0, True,  7,      8, False, 0.62, 0.85, peak_nps=6, backfill=True, max_jump_run=3),
+    "hard":     Difficulty("Hard",     0.13, 3.5, True,  9,     16, False, 0.60, 0.7, peak_nps=6, backfill=True, max_jump_run=4),
+    "expert":   Difficulty("Expert",   0.09, 4.0, True,  12,    16, False, 0.60, 0.6, peak_nps=7, backfill=True, max_jump_run=4),
 }
 
 

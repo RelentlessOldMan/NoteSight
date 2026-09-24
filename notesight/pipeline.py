@@ -133,7 +133,7 @@ def _assemble_notes(spec, analysis, diff, bpm, beat0, onsets):
     if diff.stream_fill:
         selected = stream_fill(selected, onsets, diff, bpm, beat0,
                                analysis.energy_times, analysis.energy)
-    notes = map_to_lanes(selected, diff, spec.seed)
+    notes = map_to_lanes(selected, diff, spec.seed, bpm)
     # Sustained notes sitting on a long gap become holds (freeze arrows).
     if analysis.energy is not None:
         apply_holds(notes, analysis.onsets, analysis.energy_times,
@@ -148,7 +148,59 @@ def _assemble_notes(spec, analysis, diff, bpm, beat0, onsets):
         notes = apply_structure(notes, analysis.structure, analysis.grid.bpm, beat0)
     # No hold may overlap the next note in its lane (avoids invalid unclosed holds).
     sanitize_holds(notes)
+    # Final CLEAN-EXIT guard (DDR): the jump pass placed jumps with room after them, but
+    # chorus-copy (apply_structure) + grid snap can re-create a jump followed by a tight
+    # single at a bar seam -- the awkward "peel a foot off an 8th later" pattern. Demote any
+    # such jump back to a single. Jump RUNS (jump->jump) are untouched; only jump->tight-single
+    # is fixed. Distinct note TIMES are unchanged, so the Beat Saber re-voicer is unaffected.
+    notes = _clean_jumps(notes, bpm, beat0, spec.max_subdivision,
+                         spec.allow_triplets, diff.max_jump_run)
     return notes
+
+
+def _clean_jumps(notes, bpm, beat0, sub, trip, cap, tight_beats=0.55):
+    """Demote a jump (>=2 notes at one time) to a single when it has an awkward tight single
+    neighbour that survived chorus-copy + grid snap:
+      * EXIT  -- a lone single within an 8th right AFTER (land both feet, peel one off fast).
+      * ENTRY -- a tight single right BEFORE, if it's a LONE single (space->single->jump) or
+                 if the tier is low (cap < 3, no stream-into-jump). A real stream into a jump
+                 (>=2 tight notes) on Medium+ is fine and kept.
+    Decided on the SNAPPED grid the chart actually plays on. Distinct note TIMES are unchanged
+    (a jump loses one of two same-time notes), so the Beat Saber re-voicer is unaffected."""
+    if bpm <= 0 or len(notes) < 2:
+        return notes
+    snapped = snap_times([n.time for n in notes], bpm, beat0, sub, trip)
+    order = sorted(range(len(notes)), key=lambda i: snapped[i])
+    groups = []                                  # [(snapped_time, [indices]), ...] per row
+    for i in order:
+        t = snapped[i]
+        if groups and abs(t - groups[-1][0]) < 1e-4:
+            groups[-1][1].append(i)
+        else:
+            groups.append((t, [i]))
+    allow_stream_entry = cap >= 3
+    tb = tight_beats
+    drop = set()
+    for gi, (t, idxs) in enumerate(groups):
+        if len(idxs) < 2:
+            continue                             # only jumps
+        bad = False
+        # EXIT: next row is a lone single, tight
+        if gi + 1 < len(groups):
+            nt, nidx = groups[gi + 1]
+            if len(nidx) == 1 and (nt - t) * bpm / 60.0 <= tb:
+                bad = True
+        # ENTRY: prev row is a single, tight -> bad on low tiers, or if it's a lone single
+        if not bad and gi >= 1:
+            pt, pidx = groups[gi - 1]
+            if len(pidx) == 1 and (t - pt) * bpm / 60.0 <= tb:
+                lone = gi - 2 < 0 or (pt - groups[gi - 2][0]) * bpm / 60.0 > tb
+                if not allow_stream_entry or lone:
+                    bad = True
+        if bad:
+            for j in sorted(idxs)[1:]:           # keep the alternation lane, drop the partner
+                drop.add(j)
+    return [n for i, n in enumerate(notes) if i not in drop] if drop else notes
 
 
 def _step_count(notes, bpm, beat0, sub, trip):

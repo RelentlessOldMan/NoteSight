@@ -103,13 +103,17 @@ DDR_TAP, DDR_MINE = 0, 1
 # dance-single column order L,D,U,R -> a CUTV arrow key (2=left,1=down,0=up,3=right).
 PANEL_CUT = {0: 2, 1: 1, 2: 0, 3: 3}
 # StepMania note-quantization colours (which subdivision of the measure a note lands on).
-QUANT_HEX = {1: "#ff3040", 2: "#ff3040", 4: "#ff3040",      # 1/4 & coarser = red
-             8: "#3d84ff",                                   # 1/8  = blue
-             3: "#35c24a", 6: "#35c24a", 12: "#35c24a",      # 1/12 (triplets) = green
-             16: "#ffd24f",                                  # 1/16 = yellow
-             24: "#c56bff",                                  # 1/24 = purple
-             32: "#ff8a3d",                                  # 1/32 = orange
-             48: "#3fd0d0", 64: "#ff79c6"}                   # 1/48 cyan, 1/64 pink
+# EXACT colours of StepMania 5.1's "default" noteskin, read from its "_arrow 1x8" sprite
+# pixels (the frames are indexed by quantization: 4th, 8th, 12th, 16th, 24th, 32nd, 48th, 64th).
+# So the viewer matches the pad pixel-for-pixel: on-beat 4ths are the ITG red-orange, triplets
+# (12ths) are GREEN, and yellow is 16ths (NOT 12ths).
+QUANT_HEX = {1: "#ea2501", 2: "#ea2501", 4: "#ea2501",      # 1/4 & coarser = red (on beat)
+             8: "#0170ea",                                   # 1/8  = blue
+             3: "#58ea01", 6: "#58ea01", 12: "#58ea01",      # 1/12 (triplets/3rds) = green
+             16: "#eac701",                                  # 1/16 = yellow
+             24: "#6f01ea",                                  # 1/24 = purple
+             32: "#01ea85",                                  # 1/32 = teal
+             48: "#ea0164", 64: "#6d905a"}                   # 1/48 pink, 1/64 green
 QUANT_DEFAULT = "#c8ccd8"                                     # anything odd = grey
 
 
@@ -157,7 +161,10 @@ def load_song_sm(folder):
         elif name == "STOPS":
             stops = parse_pairs(tag_value(raw))
         elif name == "NOTES":
-            c = _parse_sm_notes(raw, offset, bpms, stops, elapsed)
+            try:                                   # one malformed chart can't sink the song
+                c = _parse_sm_notes(raw, offset, bpms, stops, elapsed)
+            except Exception:
+                c = None
             if c:
                 charts.append(c)
     bpm = bpms[0][1] if bpms else 120.0
@@ -654,24 +661,34 @@ def run(folder, want_diff, mode="bs"):
 
     def load_song_into(newfolder, want_diff=None):
         # swap the whole song IN-PLACE (no restart): audio, notes, waveform, title.
+        # Parse EVERYTHING into locals first and only COMMIT on success -- a malformed
+        # folder from the Load picker then just no-ops instead of killing the session.
         nonlocal folder, bpm, audio_p, title, diffs, diff_notes, snd, dur, mode
+        newmode = detect_mode(newfolder) or mode
+        try:
+            if newmode == "ddr":
+                nbpm, naudio, ntitle, ndiffs = load_song_sm(newfolder)
+                ndiff_notes = [d["notes"] for d in ndiffs]
+            else:
+                nbpm, naudio, ntitle, ndiffs = load_song(newfolder)
+                ndiff_notes = [load_notes(d["path"], nbpm) for d in ndiffs]
+            if not ndiffs or not naudio or not os.path.isfile(naudio):
+                raise ValueError("no charts or audio in folder")
+            newsnd = _load_music(naudio)
+        except Exception as e:
+            print(f"[load skipped] {newfolder}: {e}")
+            return
         try:
             if snd is not None:
                 snd.stop()
         except Exception:
             pass
-        snd = None                       # drop the old music ref so its file handle frees
-        folder = newfolder
-        mode = detect_mode(newfolder) or mode
-        if mode == "ddr":
-            bpm, audio_p, title, diffs = load_song_sm(folder)
-            diff_notes = [d["notes"] for d in diffs]
-        else:
-            bpm, audio_p, title, diffs = load_song(folder)
-            diff_notes = [load_notes(d["path"], bpm) for d in diffs]
-        set_playfield()
-        snd = _load_music(audio_p)
+        mode = newmode
+        folder, bpm, audio_p, title, diffs, diff_notes = \
+            newfolder, nbpm, naudio, ntitle, ndiffs, ndiff_notes
+        snd = newsnd
         dur = snd.length()
+        set_playfield()
         wt = f"{APP_NAME}  -  {title}"
         window.title = wt
         try:
