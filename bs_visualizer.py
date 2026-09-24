@@ -1,15 +1,20 @@
-r"""bs_visualizer.py -- native 3D Beat Saber map visualizer (Ursina / Panda3D).
+r"""bs_visualizer.py -- native 3D rhythm-chart visualizer (Ursina / Panda3D).
 
-Real lit 3D blocks fly at you like the game (cut-direction arrows, red/blue sabers),
-synced to streamed audio, so you can study a chart's flow/readability -- and give
-timestamped feedback -- without booting the headset.
+Auto-detects the chart type and shows the right PLAYFIELD -- same window, audio,
+timeline, and feedback either way:
+  * Beat Saber (folder has info.dat): lit 3D blocks fly at you (cut arrows, red/blue).
+  * StepMania / DDR (folder has a .sm): 4 directional arrows on 4 lanes, coloured by
+    rhythm subdivision (red 1/4, blue 1/8, green 1/12, yellow 1/16, ...) with freeze holds.
+Synced to streamed audio so you can study a chart's flow/readability -- and drop
+timestamped feedback -- without booting a headset or a pad.
 
     python bs_visualizer.py "<song folder>" [Difficulty]
-    python bs_visualizer.py "out/Neon" Expert       # a folder NoteSight wrote (-f beatsaber)
+    python bs_visualizer.py "out/Neon" Expert                 # a Beat Saber folder (-f beatsaber)
+    python bs_visualizer.py "../DDR Packs/Relentless/NPC" Medium   # a StepMania .sm folder
 
 Controls: Space / click empty space = play-pause . drag or click the bar = seek
-. wheel = scrub . Left/Right = +/-5s (Shift 1s) . Up/Down = difficulty
-. [ / ] = scroll distance . Home = start . Esc = quit
+. wheel = scrub . Diff -/+ buttons = difficulty . Speed -/+ = playback rate
+. Look -/+ = scroll distance . Note button = save timestamped feedback . Esc = quit
 """
 from __future__ import annotations
 
@@ -86,6 +91,155 @@ def stats(notes, duration):
         peak = max(peak, i - lo + 1)
     return {"total": total, "reds": reds, "blues": blues, "bombs": bombs,
             "doubles": doubles, "avg": avg, "peak": peak, "times": ts}
+
+
+# --------------------------------------------------------------------- DDR / .sm
+# The viewer auto-detects the chart type: a folder with info.dat is a Beat Saber map;
+# a folder with a .sm is a StepMania/DDR song. Same window, audio, timeline, feedback --
+# only the PLAYFIELD differs (BS = 3D blocks on a 4x3 grid; DDR = 4 directional arrows
+# on 4 lanes, coloured by rhythm subdivision so the beat reads at a glance).
+
+DDR_TAP, DDR_MINE = 0, 1
+# dance-single column order L,D,U,R -> a CUTV arrow key (2=left,1=down,0=up,3=right).
+PANEL_CUT = {0: 2, 1: 1, 2: 0, 3: 3}
+# StepMania note-quantization colours (which subdivision of the measure a note lands on).
+QUANT_HEX = {1: "#ff3040", 2: "#ff3040", 4: "#ff3040",      # 1/4 & coarser = red
+             8: "#3d84ff",                                   # 1/8  = blue
+             3: "#35c24a", 6: "#35c24a", 12: "#35c24a",      # 1/12 (triplets) = green
+             16: "#ffd24f",                                  # 1/16 = yellow
+             24: "#c56bff",                                  # 1/24 = purple
+             32: "#ff8a3d",                                  # 1/32 = orange
+             48: "#3fd0d0", 64: "#ff79c6"}                   # 1/48 cyan, 1/64 pink
+QUANT_DEFAULT = "#c8ccd8"                                     # anything odd = grey
+
+
+def _quant_hex(r, R):
+    """Colour for a note at row r of R rows in a measure, by its rhythm subdivision."""
+    from math import gcd
+    den = R // gcd(r, R) if r else 1        # measure divided into `den` equal parts
+    return QUANT_HEX.get(den, QUANT_DEFAULT)
+
+
+def _sm_helpers():
+    """Import the .sm timing helpers from eval/smparse.py (kept out of the public
+    top-level imports so a BS-only run never needs the eval harness on the path)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.path.join(here, "eval") not in sys.path:
+        sys.path.insert(0, os.path.join(here, "eval"))
+    from smparse import _split_tags, _parse_pairs, _tag_value, _elapsed  # noqa
+    return _split_tags, _parse_pairs, _tag_value, _elapsed
+
+
+def load_song_sm(folder):
+    """Parse a StepMania song folder. Returns (bpm, audio_path, title, diffs) mirroring
+    load_song(); each diff carries its parsed DDR notes so the caller doesn't re-read."""
+    sm_files = sorted(glob.glob(os.path.join(folder, "*.sm"))
+                      + glob.glob(os.path.join(folder, "*.SM")))
+    if not sm_files:
+        raise SystemExit(f"no .sm in {folder}")
+    split_tags, parse_pairs, tag_value, elapsed = _sm_helpers()
+    text = open(sm_files[0], encoding="utf-8", errors="replace").read()
+    title, music, offset = os.path.basename(folder), "", 0.0
+    bpms, stops = [(0.0, 120.0)], []
+    charts = []
+    for name, raw in split_tags(text):
+        if name == "TITLE":
+            title = tag_value(raw) or title
+        elif name == "MUSIC":
+            music = tag_value(raw)
+        elif name == "OFFSET":
+            try:
+                offset = float(tag_value(raw))
+            except ValueError:
+                offset = 0.0
+        elif name == "BPMS":
+            bpms = parse_pairs(tag_value(raw)) or bpms
+        elif name == "STOPS":
+            stops = parse_pairs(tag_value(raw))
+        elif name == "NOTES":
+            c = _parse_sm_notes(raw, offset, bpms, stops, elapsed)
+            if c:
+                charts.append(c)
+    bpm = bpms[0][1] if bpms else 120.0
+    audio_p = os.path.join(folder, music) if music else ""
+    if not os.path.isfile(audio_p):
+        cands = (glob.glob(os.path.join(folder, "*.ogg")) + glob.glob(os.path.join(folder, "*.mp3"))
+                 + glob.glob(os.path.join(folder, "*.wav")))
+        audio_p = cands[0] if cands else ""
+    RANK = {"beginner": 0, "easy": 1, "medium": 2, "hard": 3, "challenge": 4, "edit": 5}
+    diffs = [{"name": c["difficulty"], "rank": RANK.get(c["difficulty"].lower(), 9),
+              "njs": c["meter"], "notes": c["notes"]} for c in charts]
+    diffs.sort(key=lambda d: d["rank"])
+    return bpm, audio_p, title, diffs
+
+
+def _parse_sm_notes(raw, offset, bpms, stops, elapsed):
+    """One #NOTES payload -> {difficulty, meter, notes}. notes are unified 7-tuples
+    (time, col, 0, kind, cut_dir, quant_hex, hold_end_time) for the DDR playfield."""
+    parts = raw.split(":", 5)
+    if len(parts) < 6:
+        return None
+    if parts[0].strip() != "dance-single":
+        return None
+    difficulty = parts[2].strip()
+    try:
+        meter = int(float(parts[3].strip()))
+    except ValueError:
+        meter = 0
+    import re as _re
+    body = _re.sub(r"//[^\n]*", "", parts[5])
+    notes, holds = [], {}                       # holds: col -> index into notes (open hold head)
+    for m_idx, measure in enumerate(body.split(",")):
+        lines = [ln.strip() for ln in measure.splitlines() if ln.strip()]
+        lines = [ln for ln in lines if set(ln) <= set("0123456789M")]
+        R = len(lines)
+        if R == 0:
+            continue
+        for r, line in enumerate(lines):
+            beat = 4.0 * m_idx + 4.0 * r / R
+            t = elapsed(beat, offset, bpms, stops)
+            qh = _quant_hex(r, R)
+            for col, ch in enumerate(line[:4]):
+                if ch in "124":                 # tap / hold-head / roll-head
+                    if ch in "24":
+                        holds[col] = len(notes)
+                    notes.append([t, col, 0, DDR_TAP, PANEL_CUT[col], qh, None])
+                elif ch == "3" and col in holds:  # hold/roll tail -> close its head
+                    notes[holds.pop(col)][6] = t
+                elif ch == "M":                 # mine
+                    notes.append([t, col, 0, DDR_MINE, PANEL_CUT[col], "#2a2c36", None])
+    notes.sort(key=lambda n: n[0])
+    return {"difficulty": difficulty, "meter": meter, "notes": [tuple(n) for n in notes]}
+
+
+def stats_ddr(notes, duration):
+    """DDR-side stats mirroring stats(): total onsets, jumps (>=2 same time), avg/peak NPS."""
+    ts = [n[0] for n in notes if n[3] == DDR_TAP]
+    total = len(ts)
+    tc = Counter(round(t, 3) for t in ts)
+    jumps = sum(1 for c in tc.values() if c >= 2)
+    distinct = sorted(tc)                        # NPS is on distinct rows (a jump = 1)
+    span = (distinct[-1] - distinct[0]) if len(distinct) > 1 else (duration or 1.0)
+    avg = len(distinct) / span if span > 0 else 0.0
+    peak, lo = 0, 0
+    for i in range(len(distinct)):
+        while distinct[i] - distinct[lo] >= 1.0:
+            lo += 1
+        peak = max(peak, i - lo + 1)
+    return {"total": total, "reds": 0, "blues": 0, "bombs": 0, "doubles": jumps,
+            "avg": avg, "peak": peak, "times": distinct}
+
+
+def detect_mode(folder):
+    """'bs' if the folder is a Beat Saber map, 'ddr' if a StepMania song, else None."""
+    if not folder or not os.path.isdir(folder):
+        return None
+    if (os.path.isfile(os.path.join(folder, "info.dat"))
+            or os.path.isfile(os.path.join(folder, "Info.dat"))):
+        return "bs"
+    if glob.glob(os.path.join(folder, "*.sm")) or glob.glob(os.path.join(folder, "*.SM")):
+        return "ddr"
+    return None
 
 
 # ------------------------------------------------------------------------- 3D app
@@ -166,13 +320,15 @@ def pick_folder(initial=None):
                         ("FlagsEx", wintypes.DWORD)]
 
         buf = ctypes.create_unicode_buffer(2048)
-        filt = ctypes.create_unicode_buffer("Beat Saber chart (*.dat)\0*.dat\0All files\0*.*\0\0")
+        filt = ctypes.create_unicode_buffer(
+            "Chart (info.dat / *.sm)\0*.dat;*.sm\0Beat Saber (*.dat)\0*.dat\0"
+            "StepMania (*.sm)\0*.sm\0All files\0*.*\0\0")
         ofn = OFN()
         ofn.lStructSize = ctypes.sizeof(OFN)
         ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
         ofn.nMaxFile = 2048
         ofn.lpstrFilter = ctypes.cast(filt, wintypes.LPCWSTR)
-        ofn.lpstrTitle = "Pick a Beat Saber chart (info.dat or any .dat)"
+        ofn.lpstrTitle = "Pick a chart (Beat Saber info.dat/.dat or StepMania .sm)"
         ofn.lpstrInitialDir = initial or os.getcwd()
         ofn.Flags = 0x00081800          # EXPLORER | FILEMUSTEXIST | PATHMUSTEXIST
         if ctypes.windll.comdlg32.GetOpenFileNameW(ctypes.byref(ofn)):
@@ -186,13 +342,17 @@ UPS = 20.0                              # units/sec the notes travel toward you
 NOTE = 0.5                              # cube size (smaller vs the wider lanes)
 
 
-def run(folder, want_diff):
-    bpm, audio_p, title, diffs = load_song(folder)
+def run(folder, want_diff, mode="bs"):
+    if mode == "ddr":
+        bpm, audio_p, title, diffs = load_song_sm(folder)
+        diff_notes = [d["notes"] for d in diffs]
+    else:
+        bpm, audio_p, title, diffs = load_song(folder)
+        diff_notes = [load_notes(d["path"], bpm) for d in diffs]
     if not diffs:
-        raise SystemExit("no Standard difficulties found")
+        raise SystemExit("no difficulties found")
     if not audio_p or not os.path.isfile(audio_p):
-        raise SystemExit("no audio (.egg/.ogg) in the song folder")
-    diff_notes = [load_notes(d["path"], bpm) for d in diffs]
+        raise SystemExit("no audio in the song folder")
 
     from ursina import (Ursina, Entity, camera, color, Text, Button, InputField, window,
                         scene, mouse, held_keys, application, Vec2, Vec3, destroy, Mesh)
@@ -266,9 +426,28 @@ def run(folder, want_diff):
         stripes.append(Entity(model="cube", scale=(2 * RAILX, 0.012, 0.09),
                               position=(0, ROADY + 0.014, i * SGAP), color=color.hex("#22364a")))
 
-    # a single subtle outer hit frame at z=0 (no busy per-cell grid near the player)
-    Entity(model="wireframe_cube", color=color.hex("#2b4658"),
-           scale=(4 * COLW, 3 * ROWH, 0.02), position=(0, Y0 + ROWH, 0))
+    # Playfield markers at the hit line (z=0). BS = one outer 4x3 frame; DDR = a dim
+    # receptor arrow per lane (points the panel direction). Both are built and toggled by
+    # mode, so the Load button can swap between a Beat Saber and a StepMania song in place.
+    bs_frame = [Entity(model="wireframe_cube", color=color.hex("#2b4658"),
+                       scale=(4 * COLW, 3 * ROWH, 0.02), position=(0, Y0 + ROWH, 0))]
+    ddr_recep = []
+    for _col in range(4):
+        _rx = (_col - 1.5) * COLW
+        _va = CUTV[PANEL_CUT[_col]]
+        ddr_recep.append(Entity(model="wireframe_cube", color=color.hex("#25384a"),
+                                scale=(COLW * 0.92, COLW * 0.92, 0.02), position=(_rx, Y0, 0)))
+        _ra = Entity(model=make_arrow(), color=color.hex("#43596e"), double_sided=True,
+                     scale=COLW * 0.82, position=(_rx, Y0, 0.015))
+        _ra.rotation = Vec3(0, 0, math.degrees(math.atan2(-_va[0], _va[1])))
+        ddr_recep.append(_ra)
+
+    def set_playfield():
+        for e in bs_frame:
+            e.enabled = (mode == "bs")
+        for e in ddr_recep:
+            e.enabled = (mode == "ddr")
+    set_playfield()
 
     # note pool: cube + arrow(child) + dot(child)
     pool = []
@@ -283,7 +462,12 @@ def run(folder, want_diff):
         shadow = Entity(model="plane", color=color.hex("#05070c"), scale=NOTE * 1.05,
                         enabled=False)                 # cast on the road under the note
         shadow.alpha = 0.55
-        pool.append([cube, edge, arr, dot, shadow])
+        hold = Entity(model="cube", color=C_BLUE, enabled=False)   # DDR freeze/roll body
+        try:
+            hold.alpha = 0.45
+        except Exception:
+            pass
+        pool.append([cube, edge, arr, dot, shadow, hold])
 
     # ---- audio (Panda3D -> gives play-rate/speed) + smooth interpolated clock ----
     from panda3d.core import Filename
@@ -365,8 +549,9 @@ def run(folder, want_diff):
     st_diff = Text("", parent=camera.ui, position=Vec2(LX, 0.427),
                    origin=(-0.5, 0.5), scale=0.78, color=ACC)
     STY, VX = 0.375, LX + 0.18
-    Text("notes\ndoubles\navg NPS\npeak NPS\nnow NPS", parent=camera.ui,
-         position=Vec2(LX, STY), origin=(-0.5, 0.5), scale=0.72, color=DIM, line_height=1.5)
+    Text(f"notes\n{'jumps' if mode == 'ddr' else 'doubles'}\navg NPS\npeak NPS\nnow NPS",
+         parent=camera.ui, position=Vec2(LX, STY), origin=(-0.5, 0.5), scale=0.72,
+         color=DIM, line_height=1.5)
     st_vals = Text("", parent=camera.ui, position=Vec2(VX, STY),
                    origin=(-0.5, 0.5), scale=0.72, color=TXT, line_height=1.5)
 
@@ -438,15 +623,19 @@ def run(folder, want_diff):
         cur["di"] = i % len(diffs)
         cur["notes"] = diff_notes[cur["di"]]
         cur["times"] = [n[0] for n in cur["notes"]]
-        cur["st"] = stats(cur["notes"], dur)
+        cur["st"] = (stats_ddr if mode == "ddr" else stats)(cur["notes"], dur)
         d = diffs[cur["di"]]; s = cur["st"]
-        st_diff.text = f"{d['name']}   NJS {d['njs']:g}   BPM {bpm:.1f}"
-        cur["vals4"] = (f"{s['total']}  (R {s['reds']}/B {s['blues']})\n"
-                        f"{s['doubles']}  ({100 * s['doubles'] / max(1, s['total']):.1f}%)\n"
-                        f"{s['avg']:.2f}\n{s['peak']}")
+        if mode == "ddr":
+            st_diff.text = f"{d['name']}   meter {d['njs']:g}   BPM {bpm:.1f}"
+            cur["vals4"] = f"{s['total']}\n{s['doubles']}\n{s['avg']:.2f}\n{s['peak']}"
+        else:
+            st_diff.text = f"{d['name']}   NJS {d['njs']:g}   BPM {bpm:.1f}"
+            cur["vals4"] = (f"{s['total']}  (R {s['reds']}/B {s['blues']})\n"
+                            f"{s['doubles']}  ({100 * s['doubles'] / max(1, s['total']):.1f}%)\n"
+                            f"{s['avg']:.2f}\n{s['peak']}")
         st_vals.text = cur["vals4"] + "\n-"
         build_heat()
-        save_config({"last_song": os.path.abspath(folder), "last_diff": d["name"]})
+        save_config({"last_song": os.path.abspath(folder), "last_diff": d["name"], "mode": mode})
 
     def refresh_status():
         st_status.text = f"speed  {au['rate']:g}x\nlook  {LOOK['v']:.2f}s"
@@ -465,7 +654,7 @@ def run(folder, want_diff):
 
     def load_song_into(newfolder, want_diff=None):
         # swap the whole song IN-PLACE (no restart): audio, notes, waveform, title.
-        nonlocal folder, bpm, audio_p, title, diffs, diff_notes, snd, dur
+        nonlocal folder, bpm, audio_p, title, diffs, diff_notes, snd, dur, mode
         try:
             if snd is not None:
                 snd.stop()
@@ -473,8 +662,14 @@ def run(folder, want_diff):
             pass
         snd = None                       # drop the old music ref so its file handle frees
         folder = newfolder
-        bpm, audio_p, title, diffs = load_song(folder)
-        diff_notes = [load_notes(d["path"], bpm) for d in diffs]
+        mode = detect_mode(newfolder) or mode
+        if mode == "ddr":
+            bpm, audio_p, title, diffs = load_song_sm(folder)
+            diff_notes = [d["notes"] for d in diffs]
+        else:
+            bpm, audio_p, title, diffs = load_song(folder)
+            diff_notes = [load_notes(d["path"], bpm) for d in diffs]
+        set_playfield()
         snd = _load_music(audio_p)
         dur = snd.length()
         wt = f"{APP_NAME}  -  {title}"
@@ -502,7 +697,7 @@ def run(folder, want_diff):
 
     def do_load():
         newf = pick_folder(os.path.dirname(os.path.abspath(folder)))
-        if _has_info(newf):
+        if detect_mode(newf):
             load_song_into(newf, diffs[cur["di"]]["name"])
 
     # ---- feedback capture: screenshot + comment box, saved for mapper review ----
@@ -663,29 +858,50 @@ def run(folder, want_diff):
             if k >= len(pool):
                 break
             n = notes[idx]; z = (n[0] - t) * UPS
-            cube, edge, arr, dot, shadow = pool[k]; k += 1
+            cube, edge, arr, dot, shadow, hold = pool[k]; k += 1
             nx = (n[1] - 1.5) * COLW
             cube.enabled = True
             cube.position = (nx, Y0 + n[2] * ROWH, z)
             shadow.enabled = True
             shadow.position = (nx, ROADY + 0.014, z)   # directly below, on the road
-            typ = n[3]
-            if typ == BOMB:
-                cube.color = C_BOMB; edge.enabled = False
-                arr.enabled = False; dot.enabled = False
-            else:
-                cube.color = C_RED if typ == RED else C_BLUE
-                edge.enabled = True; edge.color = E_RED if typ == RED else E_BLUE
-                v = CUTV.get(n[4])
-                if v:
-                    arr.enabled = True; dot.enabled = False
-                    arr.rotation = Vec3(0, 0, math.degrees(math.atan2(-v[0], v[1])))
+            if mode == "ddr":
+                hold.enabled = False
+                if n[3] == DDR_MINE:
+                    cube.color = C_BOMB; edge.enabled = False
+                    arr.enabled = False; dot.enabled = True; dot.color = E_RED
                 else:
-                    arr.enabled = False; dot.enabled = True
+                    qc = color.hex(n[5])                 # rhythm-subdivision colour
+                    cube.color = qc
+                    edge.enabled = True; edge.color = color.hex("#f2f6ff")
+                    v = CUTV.get(n[4])
+                    arr.enabled = True; dot.enabled = False; arr.color = ARROWC
+                    arr.rotation = Vec3(0, 0, math.degrees(math.atan2(-v[0], v[1])))
+                    if n[6] is not None:                 # freeze/roll body: head -> tail
+                        tz = (n[6] - t) * UPS
+                        length = max(0.05, tz - z)
+                        hold.enabled = True; hold.color = qc
+                        hold.scale = (NOTE * 0.42, NOTE * 0.42, length)
+                        hold.position = (nx, Y0 + n[2] * ROWH, z + length / 2)
+            else:
+                hold.enabled = False
+                typ = n[3]
+                if typ == BOMB:
+                    cube.color = C_BOMB; edge.enabled = False
+                    arr.enabled = False; dot.enabled = False
+                else:
+                    cube.color = C_RED if typ == RED else C_BLUE
+                    edge.enabled = True; edge.color = E_RED if typ == RED else E_BLUE
+                    v = CUTV.get(n[4])
+                    if v:
+                        arr.enabled = True; dot.enabled = False; arr.color = ARROWC
+                        arr.rotation = Vec3(0, 0, math.degrees(math.atan2(-v[0], v[1])))
+                    else:
+                        arr.enabled = False; dot.enabled = True; dot.color = ARROWC
         for j in range(k, len(pool)):
             if pool[j][0].enabled:
                 pool[j][0].enabled = False
                 pool[j][4].enabled = False              # its road shadow too
+                pool[j][5].enabled = False              # its hold body too
 
         span = SN * SGAP                          # scroll the road speed-stripes at you
         for i, s in enumerate(stripes):
@@ -748,12 +964,13 @@ def main():
     cfg = load_config()
     folder = args.folder or cfg.get("last_song")          # auto-load the last song
     diff = args.difficulty or cfg.get("last_diff")        # remember the last difficulty
-    if not _has_info(folder):
+    if not detect_mode(folder):
         folder = pick_folder(os.path.dirname(folder) if folder else None)
-    if not _has_info(folder):
-        print("No Beat Saber song selected (needs info.dat).")
+    mode = detect_mode(folder)
+    if not mode:
+        print("No song selected (need a Beat Saber info.dat or a StepMania .sm).")
         return 1
-    run(folder, diff)
+    run(folder, diff, mode)
     return 0
 
 
