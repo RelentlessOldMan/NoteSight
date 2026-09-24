@@ -100,16 +100,20 @@ map requires:
 
 ## Viewer (optional)
 
-**Beat Saber 3D viewer ("SaberSight")** — `pip install -e ".[view]"` (ursina + panda3d):
+**3D chart viewer ("ChartSight")** — `pip install -e ".[view]"` (ursina + panda3d):
 
 ```bash
-python bs_visualizer.py "out/Neon" Expert
+python chart_visualizer.py "out/Neon" Expert                 # a Beat Saber folder
+python chart_visualizer.py "path/to/StepMania/Song" Medium   # a StepMania/DDR .sm folder
 ```
 
-Study a generated map's flow without a headset: lit 3D blocks fly at you like the
-game, synced to the audio. Controls: **Space**/click = play-pause · drag or click
-the bar = seek · wheel = scrub · **←/→** = ±5s · **↑/↓** = difficulty · **`[` / `]`**
-= scroll distance · **Esc** = quit. The **Note** button freezes the moment, grabs a
+Study a generated chart's flow without a headset or a pad — it **auto-detects the
+format**: Beat Saber maps show lit 3D blocks flying at you (cut arrows, red/blue),
+StepMania/DDR charts show 4 directional arrows on 4 lanes coloured by rhythm
+subdivision (with freeze holds). Same window/audio/timeline either way. Controls:
+**Space**/click = play-pause · drag or click the bar = seek · wheel = scrub ·
+**Diff −/+** = difficulty · **Speed −/+** = playback rate · **Look −/+** = scroll
+distance · **Esc** = quit. The **Note** button freezes the moment, grabs a
 screenshot, and saves your comment to a local `feedback/` folder (`feedback.md` +
 `feedback.jsonl` + PNGs) — handy for reviewing a chart and jotting fixes. Nothing
 leaves your machine.
@@ -161,7 +165,7 @@ notesight/            the engine (importable package)
     beatsaber.py      Beat Saber map writer (+ audio -> .egg encode)
 cli.py                audio file -> chart (every ChartSpec field is a flag)
 build_*.py            batch pack builders (StepMania / Beat Saber / stamina / gauntlet / mashup)
-bs_visualizer.py      Beat Saber 3D map viewer ("SaberSight")
+chart_visualizer.py   3D chart viewer ("ChartSight") -- Beat Saber + StepMania/DDR
 samples/              short royalty-free demo tracks
 eval/                 accuracy harness: score output vs hand-authored charts
 tests/                pytest suite (run: pytest)

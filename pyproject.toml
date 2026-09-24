@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-view = ["ursina>=8.3", "panda3d>=1.10"]              # bs_visualizer.py (3D Beat Saber viewer + Note capture)
+view = ["ursina>=8.3", "panda3d>=1.10"]              # chart_visualizer.py (ChartSight: 3D Beat Saber + DDR viewer + Note capture)
 dev  = ["pytest>=7"]
 
 [project.urls]

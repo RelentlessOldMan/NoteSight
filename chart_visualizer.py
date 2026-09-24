@@ -1,4 +1,4 @@
-r"""bs_visualizer.py -- native 3D rhythm-chart visualizer (Ursina / Panda3D).
+r"""chart_visualizer.py -- ChartSight: native 3D rhythm-chart visualizer (Ursina / Panda3D).
 
 Auto-detects the chart type and shows the right PLAYFIELD -- same window, audio,
 timeline, and feedback either way:
@@ -8,9 +8,9 @@ timeline, and feedback either way:
 Synced to streamed audio so you can study a chart's flow/readability -- and drop
 timestamped feedback -- without booting a headset or a pad.
 
-    python bs_visualizer.py "<song folder>" [Difficulty]
-    python bs_visualizer.py "out/Neon" Expert                 # a Beat Saber folder (-f beatsaber)
-    python bs_visualizer.py "../DDR Packs/Relentless/NPC" Medium   # a StepMania .sm folder
+    python chart_visualizer.py "<song folder>" [Difficulty]
+    python chart_visualizer.py "out/Neon" Expert                 # a Beat Saber folder (-f beatsaber)
+    python chart_visualizer.py "../DDR Packs/Relentless/NPC" Medium   # a StepMania .sm folder
 
 Controls: Space / click empty space = play-pause . drag or click the bar = seek
 . wheel = scrub . Diff -/+ buttons = difficulty . Speed -/+ = playback rate
@@ -251,7 +251,7 @@ def detect_mode(folder):
 
 # ------------------------------------------------------------------------- 3D app
 
-APP_NAME = "SaberSight"                 # the viewer's name (pairs with NoteSight)
+APP_NAME = "ChartSight"                 # the viewer's name (pairs with NoteSight; views BS + DDR)
 VERSION = "0.1"
 BUILD = datetime.fromtimestamp(os.path.getmtime(os.path.abspath(__file__))).strftime("%Y-%m-%d %H:%M")
 COPYRIGHT = "(c) 2026 RelentlessOldMan"
@@ -280,14 +280,17 @@ def compute_waveform(path, bins):
     return env
 
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".sabersight.json")
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".chartsight.json")
+_OLD_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".sabersight.json")
 
 
 def load_config():
-    try:
-        return json.load(open(CONFIG_PATH, encoding="utf-8"))
-    except Exception:
-        return {}
+    for p in (CONFIG_PATH, _OLD_CONFIG):        # fall back to the pre-rename config once
+        try:
+            return json.load(open(p, encoding="utf-8"))
+        except Exception:
+            continue
+    return {}
 
 
 def save_config(d):
