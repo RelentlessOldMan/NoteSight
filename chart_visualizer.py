@@ -365,7 +365,8 @@ def run(folder, want_diff, mode="bs"):
         raise SystemExit("no audio in the song folder")
 
     from ursina import (Ursina, Entity, camera, color, Text, Button, InputField, window,
-                        scene, mouse, held_keys, application, Vec2, Vec3, destroy, Mesh)
+                        scene, mouse, held_keys, application, Vec2, Vec3, destroy, Mesh,
+                        load_texture)
     from ursina.shaders import lit_with_shadows_shader
 
     # Set the window title + our icon BEFORE Ursina() creates the window, so it never
@@ -405,6 +406,13 @@ def run(folder, want_diff, mode="bs"):
 
     ACC = color.hex("#4fd1ff"); ACC2 = color.hex("#8adcff"); GOLD = color.hex("#ffd24f")
     TXT = color.hex("#e6e8ee"); DIM = color.hex("#9aa0b0")
+    # DDR arrow sprites: a rounded white FILL (tinted per note by rhythm colour) drawn over a
+    # matched, dilated OUTLINE mask (tinted ACC blue) -- both rendered at the SAME scale so the
+    # blue border is even all the way around, with softly rounded corners (see ddr_arrow_*.png).
+    from pathlib import Path as _Path
+    _here_tex = _Path(os.path.dirname(os.path.abspath(__file__)))
+    TEX_FILL = load_texture("ddr_arrow_fill", folder=_here_tex)
+    TEX_OUT = load_texture("ddr_arrow_outline", folder=_here_tex)
     C_RED = color.hex("#e02531"); C_BLUE = color.hex("#2166e6"); C_BOMB = color.hex("#2a2c36")
     E_RED = color.hex("#ff6b73"); E_BLUE = color.hex("#79abff")        # brighter edge tints
     PANEL = color.hex("#232734"); LINE = color.hex("#2c3040"); ARROWC = color.hex("#f2f6ff")
@@ -418,12 +426,7 @@ def run(folder, want_diff, mode="bs"):
                       (-0.14, 0.06, 0), (0.14, 0.06, 0), (0.14, -0.5, 0), (-0.14, -0.5, 0)],
             triangles=[(0, 1, 2), (3, 4, 5), (3, 5, 6)], mode="triangle")
 
-    # DDR arrow: chunky game-style glyph -- wide head, SHORT stub stem (not the long BS tail).
-    def make_ddr_arrow():
-        return Mesh(
-            vertices=[(0, 0.5, 0), (-0.42, -0.02, 0), (0.42, -0.02, 0),
-                      (-0.17, -0.02, 0), (0.17, -0.02, 0), (0.17, -0.34, 0), (-0.17, -0.34, 0)],
-            triangles=[(0, 1, 2), (3, 4, 5), (3, 5, 6)], mode="triangle")
+    # (DDR arrows are now textured quads -- ddr_arrow_fill/outline.png -- for even rounded outlines.)
 
     # camera + lighting + atmosphere
     camera.fov = 70
@@ -486,16 +489,19 @@ def run(folder, want_diff, mode="bs"):
     # bottom UI (stats/timeline/toolbar/feedback) is shared -- only the playfield differs. --
     DDR_TOP, DDR_BOT = 0.40, -0.26           # receptor y (top) .. field bottom (above timeline)
     DDR_H = DDR_TOP - DDR_BOT
-    DDR_DX, DDR_ARR = 0.105, 0.07            # lane spacing, arrow size (smaller, game-like)
+    DDR_DX, DDR_ARR = 0.105, 0.07            # lane spacing, lane-geometry reference size
+    # The sprite quad is square (arrow fills ~60% of the canvas), so its on-screen scale is
+    # larger than the old mesh's -- this keeps the visible arrow about the same game-like size.
+    DDR_QS = DDR_ARR * 1.85
 
     def _lane_x(col):
         return (col - 1.5) * DDR_DX
 
     def _panel_rot(col):
-        # +180: on the camera.ui overlay the arrow renders point-reflected vs the 3D path,
-        # so both L/R and U/D come out reversed -- rotating a half-turn puts them right.
+        # The camera.ui overlay rotates clockwise for +z, so a straight atan2 of the cut vector
+        # (mirror-x only, NO half-turn) points the arrow the right way: L, D, U, R per column.
         va = CUTV[PANEL_CUT[col]]
-        return Vec3(0, 0, math.degrees(math.atan2(-va[0], va[1])) + 180)
+        return Vec3(0, 0, math.degrees(math.atan2(va[0], va[1])))
 
     ddr_field = []
     _midy = (DDR_TOP + DDR_BOT) / 2
@@ -509,24 +515,24 @@ def run(folder, want_diff, mode="bs"):
     for _col in range(5):                     # 5 lane dividers (edges of the 4 lanes)
         ddr_field.append(Entity(parent=camera.ui, model="quad", color=color.hex("#1b2430"),
                                 scale=(0.005, DDR_H), position=(_lane_x(_col) - DDR_DX / 2, _midy, 0.05)))
-    DDR_OUT = "#eef2f8"                        # LIGHT arrow outline (reads on the dark field)
-    for _col in range(4):                     # dim receptor arrows at the top (with outline)
+    for _col in range(4):                     # dim receptor arrows at the top (blue outline + fill)
         _rot = _panel_rot(_col)
-        ro = Entity(parent=camera.ui, model=make_ddr_arrow(), color=color.hex(DDR_OUT),
-                    double_sided=True, scale=DDR_ARR * 1.28, position=(_lane_x(_col), DDR_TOP, 0.045))
+        ro = Entity(parent=camera.ui, model="quad", texture=TEX_OUT, color=ACC,
+                    scale=DDR_QS, position=(_lane_x(_col), DDR_TOP, 0.045))
         ro.rotation = _rot
-        rc = Entity(parent=camera.ui, model=make_ddr_arrow(), color=color.hex("#46607a"),
-                    double_sided=True, scale=DDR_ARR, position=(_lane_x(_col), DDR_TOP, 0.04))
+        rc = Entity(parent=camera.ui, model="quad", texture=TEX_FILL, color=color.hex("#3a4a5e"),
+                    scale=DDR_QS, position=(_lane_x(_col), DDR_TOP, 0.04))
         rc.rotation = _rot
         ddr_field.append(ro); ddr_field.append(rc)
 
-    # DDR 2D note pool per slot: outline arrow (behind) + coloured arrow + hold bar (UI overlay).
+    # DDR 2D note pool per slot: ACC-blue outline quad (behind) + rhythm-coloured fill quad +
+    # hold bar (all on the UI overlay). Both arrow quads share one scale so the border stays even.
     ddr_pool = []
     for _ in range(240):
-        ao = Entity(parent=camera.ui, model=make_ddr_arrow(), color=color.hex(DDR_OUT),
-                    double_sided=True, scale=DDR_ARR * 1.28, enabled=False)
-        a = Entity(parent=camera.ui, model=make_ddr_arrow(), double_sided=True,
-                   scale=DDR_ARR, enabled=False)
+        ao = Entity(parent=camera.ui, model="quad", texture=TEX_OUT, color=ACC,
+                    scale=DDR_QS, enabled=False)
+        a = Entity(parent=camera.ui, model="quad", texture=TEX_FILL,
+                   scale=DDR_QS, enabled=False)
         hb = Entity(parent=camera.ui, model="quad", color=C_BLUE, enabled=False)
         try:
             hb.alpha = 0.55

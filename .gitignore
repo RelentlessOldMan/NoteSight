@@ -51,6 +51,7 @@ _sources/
 _cache/
 *.egg
 feedback/
+.chartsight.json
 .sabersight.json
 _mashup/
 
