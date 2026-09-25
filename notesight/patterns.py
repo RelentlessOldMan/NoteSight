@@ -187,62 +187,48 @@ def assign(onsets: list[OnsetEvent], diff: Difficulty, seed: int = 0, bpm: float
         prev_emitted = tf[base[-1]]
 
     # Jump-flow pass. A strong onset earns a 2-foot jump (natural opposite, L+R or U+D).
-    # Two rules, learned from hand charts (see local/research/jump_runs.py):
-    #  1) CLEAN EXIT: a jump (or the last jump of a run) must be followed by SPACE, never a
-    #     tight single. "Land both feet, then peel one off an 8th later" is the awkward pattern
-    #     real charters almost never do; we used to do it on ~27-55% of jumps. So jumps anchor
-    #     only on strong hits that have room after them.
-    #  2) RUNS: back-to-back jumps are FUN and hand-common, growing with difficulty. We grow a
-    #     run BACKWARD from a clean-exit anchor into tight strong predecessors, up to the tier's
-    #     max_jump_run cap (Beginner 1 .. Hard/Challenge 4). Entry may be tight -- a stream
-    #     flowing INTO a jump run is comfortable (hand charts do it constantly).
+    # ONE rule, tier-scaled (see local/research/jump_runs.py + user play feedback): a jump needs
+    # at least `jump_gap_beats` of room to BOTH neighbouring notes -- transitioning INTO, OUT OF,
+    # or BETWEEN jumps any tighter than that is awkward (esp. for casual players). So:
+    #  - Medium & below: jump_gap_beats ~ a QUARTER note -> jumps sit on well-spaced beats and
+    #    a "run" is jumps on consecutive quarters; no 8th single->jump / 8th jump->jump.
+    #  - Hard/Challenge: ~ an 8th -> tighter jumps + 8th-spaced runs are allowed (advanced).
+    # Consecutive eligible strong notes chain into a run up to the tier's max_jump_run cap; a run
+    # always ends into >= jump_gap_beats of space (never a tight single after).
     partner = {LEFT: RIGHT, RIGHT: LEFT, DOWN: UP, UP: DOWN}
     jump_strength = getattr(diff, "jump_strength", JUMP_STRENGTH)
     jump_gap = getattr(diff, "jump_gap", JUMP_MIN_GAP)
     cap = max(1, getattr(diff, "max_jump_run", 1))
-    TIGHT = 0.55                                    # <= an 8th note (beats) == "in a fast run"
+    jg = getattr(diff, "jump_gap_beats", 0.55)     # min beats a jump needs on each side
+    eps = 1e-6
 
     n = len(singles)
     times = [t for t, _, _ in singles]
 
-    def gap_after(i):
-        """Beats from note i to i+1 (falls back to ~8th-per-0.5s if bpm unknown)."""
-        if i + 1 >= n:
-            return 1e9
-        dt = times[i + 1] - times[i]
+    def gap(i, j):
+        """Beats between notes i and j (falls back to ~8th-per-0.5s if bpm unknown)."""
+        dt = times[j] - times[i]
         return dt * bpm / 60.0 if bpm and bpm > 0 else dt * 2.0
 
     strong = [diff.allow_jumps and s > jump_strength for _, _, s in singles]
     is_jump = [False] * n
     if diff.allow_jumps:
-        # ENTRY rule: a lone "space -> single -> jump" is awkward on every tier (you step once
-        # then must plant both feet an 8th later from a standstill). A tight single may lead
-        # INTO a jump only on Medium+ AND only as a real STREAM (>=2 tight notes before it) --
-        # streaming into a jump is comfortable and hand-common up high. Beginner/Easy jumps
-        # must have space before them (FREE jumps), matching hand charts (~97-100% free).
-        allow_stream_entry = cap >= 3
-        last_anchor_t = -1e9
+        run = 0
+        last_jump_t = -1e9
         for i in range(n):
-            if not strong[i] or gap_after(i) <= TIGHT:    # anchor: a strong hit WITH room after
+            if not strong[i]:
+                run = 0
                 continue
-            if times[i] - last_anchor_t < jump_gap:       # rate-limit how often runs land
-                continue
-            run_idx = [i]                                 # grow the run backward, capped
-            k = i - 1
-            while (len(run_idx) < cap and k >= 0 and strong[k]
-                   and not is_jump[k] and gap_after(k) <= TIGHT):
-                run_idx.append(k)
-                k -= 1
-            start = run_idx[-1]
-            entry = start - 1                             # the note right before the run
-            if entry >= 0 and gap_after(entry) <= TIGHT:  # a tight single leads in
-                if not allow_stream_entry:
-                    continue                              # low tier: jumps need space before
-                if not (entry - 1 >= 0 and gap_after(entry - 1) <= TIGHT):
-                    continue                              # lone single (not a stream) -> skip
-            for idx in run_idx:
-                is_jump[idx] = True
-            last_anchor_t = times[i]
+            prev_ok = i == 0 or gap(i - 1, i) >= jg - eps      # >= jump_gap room before
+            next_ok = i == n - 1 or gap(i, i + 1) >= jg - eps  # ... and after
+            cont = i > 0 and is_jump[i - 1]                     # continuing a run?
+            spaced = cont or (times[i] - last_jump_t >= jump_gap)   # rate-limit NEW jumps/runs
+            if prev_ok and next_ok and spaced and run < cap:
+                is_jump[i] = True
+                run = run + 1 if cont else 1
+                last_jump_t = times[i]
+            else:
+                run = 0
 
     out: list[tuple[float, int, float]] = []
     for i, (t, lane, s) in enumerate(singles):

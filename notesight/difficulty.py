@@ -64,6 +64,10 @@ class Difficulty:
     # EXIT into space -- never a tight single right after -- since that tight exit is the
     # awkward "jump wedged in a stream" pattern hand charts almost never do.
     max_jump_run: int = 1
+    # Minimum spacing (in BEATS) a jump needs to its neighbours on EACH side, and between
+    # consecutive jumps in a run. An 8th (0.5) is too little time to plant/peel both feet on
+    # mid/low tiers, so those use a QUARTER (1.0); Hard/Challenge allow the tighter 8th.
+    jump_gap_beats: float = 0.55
 
 
 # Calibrated to hand-authored DDR A20 charts: triplets are ~never
@@ -83,14 +87,16 @@ DIFFICULTIES = {
     # hard->Hard 3.5, expert->Challenge 4.0. backfill=True makes each HIT its target exactly.
     # NOTE: max_jump_run is per DDR *slot* (DDR_TIERS maps preset->slot): easy->Beginner=1,
     # medium->Easy=2, midhard->Medium=3, hard->Hard=4, expert->Challenge=4 (from hand-chart study).
-    "easy":     Difficulty("Easy",     0.34, 2.0, True,  4,      8, False, 0.70, 1.5, peak_nps=4, backfill=True, max_jump_run=1),
-    "medium":   Difficulty("Medium",   0.20, 2.5, True,  6,      8, False, 0.65, 1.0, peak_nps=5, backfill=True, max_jump_run=2),
+    # jump_gap_beats: Beginner..Medium need a QUARTER (1.0) around jumps (an 8th is too tight for
+    # casual play -- user feedback); Hard/Challenge allow the tighter 8th (0.5) + 8th runs.
+    "easy":     Difficulty("Easy",     0.34, 2.0, True,  4,      8, False, 0.70, 1.5, peak_nps=4, backfill=True, max_jump_run=1, jump_gap_beats=1.0),
+    "medium":   Difficulty("Medium",   0.20, 2.5, True,  6,      8, False, 0.65, 1.0, peak_nps=5, backfill=True, max_jump_run=2, jump_gap_beats=1.0),
     # a NEW tier sitting between Medium and Hard (fills the biggest density gap on the
     # DDR ladder). Params interpolated Medium<->Hard. Used only by build_ddr_pack's
     # DDR_TIERS (regular .sm songs); not part of the Beat Saber or stamina ladders.
-    "midhard":  Difficulty("Medium",   0.16, 3.0, True,  7,      8, False, 0.62, 0.85, peak_nps=6, backfill=True, max_jump_run=3),
-    "hard":     Difficulty("Hard",     0.13, 3.5, True,  9,     16, False, 0.60, 0.7, peak_nps=6, backfill=True, max_jump_run=4),
-    "expert":   Difficulty("Expert",   0.09, 4.0, True,  12,    16, False, 0.60, 0.6, peak_nps=7, backfill=True, max_jump_run=4),
+    "midhard":  Difficulty("Medium",   0.16, 3.0, True,  7,      8, False, 0.62, 0.85, peak_nps=6, backfill=True, max_jump_run=3, jump_gap_beats=1.0),
+    "hard":     Difficulty("Hard",     0.13, 3.5, True,  9,     16, False, 0.60, 0.7, peak_nps=6, backfill=True, max_jump_run=4, jump_gap_beats=0.5),
+    "expert":   Difficulty("Expert",   0.09, 4.0, True,  12,    16, False, 0.60, 0.6, peak_nps=7, backfill=True, max_jump_run=4, jump_gap_beats=0.5),
 }
 
 

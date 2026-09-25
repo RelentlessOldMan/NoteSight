@@ -368,14 +368,27 @@ def run(folder, want_diff, mode="bs"):
                         scene, mouse, held_keys, application, Vec2, Vec3, destroy, Mesh)
     from ursina.shaders import lit_with_shadows_shader
 
+    # Set the window title + our icon BEFORE Ursina() creates the window, so it never
+    # flashes "ursina" / the default panda icon on startup.
+    _ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chartsight.ico")
+    try:
+        from panda3d.core import loadPrcFileData
+        loadPrcFileData("", f"window-title {APP_NAME}")
+        if os.path.isfile(_ico):
+            loadPrcFileData("", f"icon-filename {_ico.replace(chr(92), '/')}")
+    except Exception:
+        pass
+
     app = Ursina(vsync=True)
     wtitle = f"{APP_NAME}  -  {title}"
     window.title = wtitle
     window.color = color.hex("#12141a")
     window.borderless = False
     try:
-        from panda3d.core import WindowProperties       # force the OS titlebar text
+        from panda3d.core import WindowProperties, Filename   # force titlebar text + icon
         _wp = WindowProperties(); _wp.setTitle(wtitle)
+        if os.path.isfile(_ico):
+            _wp.setIconFilename(Filename.fromOsSpecific(_ico))
         app.win.requestProperties(_wp)
     except Exception:
         pass
@@ -405,6 +418,13 @@ def run(folder, want_diff, mode="bs"):
                       (-0.14, 0.06, 0), (0.14, 0.06, 0), (0.14, -0.5, 0), (-0.14, -0.5, 0)],
             triangles=[(0, 1, 2), (3, 4, 5), (3, 5, 6)], mode="triangle")
 
+    # DDR arrow: chunky game-style glyph -- wide head, SHORT stub stem (not the long BS tail).
+    def make_ddr_arrow():
+        return Mesh(
+            vertices=[(0, 0.5, 0), (-0.42, -0.02, 0), (0.42, -0.02, 0),
+                      (-0.17, -0.02, 0), (0.17, -0.02, 0), (0.17, -0.34, 0), (-0.17, -0.34, 0)],
+            triangles=[(0, 1, 2), (3, 4, 5), (3, 5, 6)], mode="triangle")
+
     # camera + lighting + atmosphere
     camera.fov = 70
     camera.position = Vec3(0, 1.62, -3.8)        # close first-person, like standing in-game
@@ -417,49 +437,31 @@ def run(folder, want_diff, mode="bs"):
     scene.fog_color = color.hex("#12141a")
     scene.fog_density = (26, 74)             # linear fog: notes fade in with depth
 
-    # ---- the floor/track: the 4 note lanes with glowing side RAILS beyond them (the
-    # game environment edges) + speed-stripes flowing at you. (BS grid is 4 wide x 3.) --
+    # ---- BEAT SABER 3D track: the 4 note lanes with glowing side RAILS + speed-stripes
+    # flowing at you (BS grid is 4 wide x 3). All collected in bs_env -> hidden in DDR mode. --
     ROAD_LEN, ROADY = 70.0, Y0 - 0.32
     RAILX = 2 * COLW + 0.45
-    Entity(model="plane", scale=(60, 1, ROAD_LEN * 2.4), position=(0, ROADY - 0.03, ROAD_LEN),
-           color=color.hex("#0d0f15"))                          # wide dark ground
-    Entity(model="plane", scale=(2 * RAILX, 1, ROAD_LEN), position=(0, ROADY, ROAD_LEN / 2),
-           color=color.hex("#161a23"))                          # the track surface
-    for sx in (-RAILX, RAILX):                                  # bright side rails
-        Entity(model="cube", scale=(0.06, 0.05, ROAD_LEN),
-               position=(sx, ROADY + 0.03, ROAD_LEN / 2), color=ACC)
-    for i in range(1, 4):                                       # 3 subtle inner lane lines
-        Entity(model="cube", scale=(0.02, 0.011, ROAD_LEN),
-               position=((i - 2) * COLW, ROADY + 0.011, ROAD_LEN / 2), color=color.hex("#243a48"))
-    stripes, SN, SGAP = [], 24, 3.2                            # cross-stripes flowing at you
+    bs_env = []
+    bs_env.append(Entity(model="plane", scale=(60, 1, ROAD_LEN * 2.4),
+                         position=(0, ROADY - 0.03, ROAD_LEN), color=color.hex("#0d0f15")))
+    bs_env.append(Entity(model="plane", scale=(2 * RAILX, 1, ROAD_LEN),
+                         position=(0, ROADY, ROAD_LEN / 2), color=color.hex("#161a23")))
+    for sx in (-RAILX, RAILX):
+        bs_env.append(Entity(model="cube", scale=(0.06, 0.05, ROAD_LEN),
+                             position=(sx, ROADY + 0.03, ROAD_LEN / 2), color=ACC))
+    for i in range(1, 4):
+        bs_env.append(Entity(model="cube", scale=(0.02, 0.011, ROAD_LEN),
+                             position=((i - 2) * COLW, ROADY + 0.011, ROAD_LEN / 2),
+                             color=color.hex("#243a48")))
+    stripes, SN, SGAP = [], 24, 3.2
     for i in range(SN):
-        stripes.append(Entity(model="cube", scale=(2 * RAILX, 0.012, 0.09),
-                              position=(0, ROADY + 0.014, i * SGAP), color=color.hex("#22364a")))
+        e = Entity(model="cube", scale=(2 * RAILX, 0.012, 0.09),
+                   position=(0, ROADY + 0.014, i * SGAP), color=color.hex("#22364a"))
+        stripes.append(e); bs_env.append(e)
+    bs_env.append(Entity(model="wireframe_cube", color=color.hex("#2b4658"),   # 4x3 hit frame
+                         scale=(4 * COLW, 3 * ROWH, 0.02), position=(0, Y0 + ROWH, 0)))
 
-    # Playfield markers at the hit line (z=0). BS = one outer 4x3 frame; DDR = a dim
-    # receptor arrow per lane (points the panel direction). Both are built and toggled by
-    # mode, so the Load button can swap between a Beat Saber and a StepMania song in place.
-    bs_frame = [Entity(model="wireframe_cube", color=color.hex("#2b4658"),
-                       scale=(4 * COLW, 3 * ROWH, 0.02), position=(0, Y0 + ROWH, 0))]
-    ddr_recep = []
-    for _col in range(4):
-        _rx = (_col - 1.5) * COLW
-        _va = CUTV[PANEL_CUT[_col]]
-        ddr_recep.append(Entity(model="wireframe_cube", color=color.hex("#25384a"),
-                                scale=(COLW * 0.92, COLW * 0.92, 0.02), position=(_rx, Y0, 0)))
-        _ra = Entity(model=make_arrow(), color=color.hex("#43596e"), double_sided=True,
-                     scale=COLW * 0.82, position=(_rx, Y0, 0.015))
-        _ra.rotation = Vec3(0, 0, math.degrees(math.atan2(-_va[0], _va[1])))
-        ddr_recep.append(_ra)
-
-    def set_playfield():
-        for e in bs_frame:
-            e.enabled = (mode == "bs")
-        for e in ddr_recep:
-            e.enabled = (mode == "ddr")
-    set_playfield()
-
-    # note pool: cube + arrow(child) + dot(child)
+    # BS note pool: 3D cube + arrow(child) + dot(child) + road shadow + hold body.
     pool = []
     for _ in range(200):
         cube = Entity(model="cube", color=C_BLUE, shader=lit_with_shadows_shader,
@@ -470,14 +472,81 @@ def run(folder, want_diff, mode="bs"):
         dot = Entity(parent=cube, model="circle", color=ARROWC, scale=0.34,
                      position=Vec3(0, 0, -0.56), enabled=False)
         shadow = Entity(model="plane", color=color.hex("#05070c"), scale=NOTE * 1.05,
-                        enabled=False)                 # cast on the road under the note
+                        enabled=False)
         shadow.alpha = 0.55
-        hold = Entity(model="cube", color=C_BLUE, enabled=False)   # DDR freeze/roll body
+        hold = Entity(model="cube", color=C_BLUE, enabled=False)
         try:
             hold.alpha = 0.45
         except Exception:
             pass
         pool.append([cube, edge, arr, dot, shadow, hold])
+
+    # ---- DDR 2D PLAYFIELD (flat, on the UI overlay, like the game): 4 lanes, arrows scroll
+    # UP from the bottom to the receptor "timing arrows" at the top. Hidden in BS mode. The
+    # bottom UI (stats/timeline/toolbar/feedback) is shared -- only the playfield differs. --
+    DDR_TOP, DDR_BOT = 0.40, -0.26           # receptor y (top) .. field bottom (above timeline)
+    DDR_H = DDR_TOP - DDR_BOT
+    DDR_DX, DDR_ARR = 0.105, 0.07            # lane spacing, arrow size (smaller, game-like)
+
+    def _lane_x(col):
+        return (col - 1.5) * DDR_DX
+
+    def _panel_rot(col):
+        # +180: on the camera.ui overlay the arrow renders point-reflected vs the 3D path,
+        # so both L/R and U/D come out reversed -- rotating a half-turn puts them right.
+        va = CUTV[PANEL_CUT[col]]
+        return Vec3(0, 0, math.degrees(math.atan2(-va[0], va[1])) + 180)
+
+    ddr_field = []
+    _midy = (DDR_TOP + DDR_BOT) / 2
+    _pan = Entity(parent=camera.ui, model="quad", color=color.hex("#0c1016"),
+                  scale=(4 * DDR_DX + 0.03, DDR_H + 0.04), position=(0, _midy, 0.06))
+    try:
+        _pan.alpha = 0.72
+    except Exception:
+        pass
+    ddr_field.append(_pan)
+    for _col in range(5):                     # 5 lane dividers (edges of the 4 lanes)
+        ddr_field.append(Entity(parent=camera.ui, model="quad", color=color.hex("#1b2430"),
+                                scale=(0.005, DDR_H), position=(_lane_x(_col) - DDR_DX / 2, _midy, 0.05)))
+    DDR_OUT = "#eef2f8"                        # LIGHT arrow outline (reads on the dark field)
+    for _col in range(4):                     # dim receptor arrows at the top (with outline)
+        _rot = _panel_rot(_col)
+        ro = Entity(parent=camera.ui, model=make_ddr_arrow(), color=color.hex(DDR_OUT),
+                    double_sided=True, scale=DDR_ARR * 1.28, position=(_lane_x(_col), DDR_TOP, 0.045))
+        ro.rotation = _rot
+        rc = Entity(parent=camera.ui, model=make_ddr_arrow(), color=color.hex("#46607a"),
+                    double_sided=True, scale=DDR_ARR, position=(_lane_x(_col), DDR_TOP, 0.04))
+        rc.rotation = _rot
+        ddr_field.append(ro); ddr_field.append(rc)
+
+    # DDR 2D note pool per slot: outline arrow (behind) + coloured arrow + hold bar (UI overlay).
+    ddr_pool = []
+    for _ in range(240):
+        ao = Entity(parent=camera.ui, model=make_ddr_arrow(), color=color.hex(DDR_OUT),
+                    double_sided=True, scale=DDR_ARR * 1.28, enabled=False)
+        a = Entity(parent=camera.ui, model=make_ddr_arrow(), double_sided=True,
+                   scale=DDR_ARR, enabled=False)
+        hb = Entity(parent=camera.ui, model="quad", color=C_BLUE, enabled=False)
+        try:
+            hb.alpha = 0.55
+        except Exception:
+            pass
+        ddr_pool.append([ao, a, hb])
+
+    def set_playfield():
+        bs = (mode == "bs")
+        for e in bs_env:
+            e.enabled = bs
+        for e in ddr_field:
+            e.enabled = not bs
+        if bs:                                # clear the inactive mode's note entities
+            for ao, a, hb in ddr_pool:
+                ao.enabled = a.enabled = hb.enabled = False
+        else:
+            for it in pool:
+                it[0].enabled = it[4].enabled = it[5].enabled = False
+    set_playfield()
 
     # ---- audio (Panda3D -> gives play-rate/speed) + smooth interpolated clock ----
     from panda3d.core import Filename
@@ -507,12 +576,11 @@ def run(folder, want_diff, mode="bs"):
         if au["lastpf"] is None:
             au["lastpf"] = pf
         dt = pf - au["lastpf"]; au["lastpf"] = pf
+        # Clock runs PURELY on rate*dt -> perfectly smooth at any play-rate. We do NOT resync to
+        # snd.getTime() during playback: getTime updates coarsely / lags the audio buffer, so
+        # snapping to it yanked the notes (very visible on DDR's fast scroll). Seeks + _start set
+        # est directly, and end-of-song is caught by snd.status() above, so no resync is needed.
         au["est"] = min(au["est"] + dt * au["rate"], dur)
-        # run the clock purely on rate*dt (perfectly smooth at any speed). Only resync on
-        # a BIG gap (a seek) -- no per-frame pull toward getTime, whose audio-buffer lag
-        # was yanking the notes back and making slow-mo look jumpy.
-        if abs(snd.getTime() - au["est"]) > 0.4:
-            au["est"] = min(max(snd.getTime(), 0.0), dur)
 
     def anow():
         return au["est"] if au["playing"] else au["base"]
@@ -539,7 +607,9 @@ def run(folder, want_diff, mode="bs"):
             _start(t)
 
     # ---- UI ----  (ui space: y in [-.5,.5], x in [-aspect/2, aspect/2]) ----
-    LOOK = {"v": 2.2}
+    # look-ahead seconds = how much chart is on screen. DDR wants a FAST scroll (arrows spread
+    # out, ~300bpm-style read) so it defaults short; BS keeps the longer fly-in. Look -/+ adjusts.
+    LOOK = {"v": 0.95 if mode == "ddr" else 2.2}
     LX = -0.86                                       # left text anchor
     RX = 0.86                                        # right text anchor
 
@@ -874,35 +944,47 @@ def run(folder, want_diff, mode="bs"):
         lo = bisect.bisect_left(times, t - 0.12)
         hi = bisect.bisect_right(times, t + LOOK["v"])
         k = 0
-        for idx in range(lo, hi):
-            if k >= len(pool):
-                break
-            n = notes[idx]; z = (n[0] - t) * UPS
-            cube, edge, arr, dot, shadow, hold = pool[k]; k += 1
-            nx = (n[1] - 1.5) * COLW
-            cube.enabled = True
-            cube.position = (nx, Y0 + n[2] * ROWH, z)
-            shadow.enabled = True
-            shadow.position = (nx, ROADY + 0.014, z)   # directly below, on the road
-            if mode == "ddr":
-                hold.enabled = False
+        if mode == "ddr":
+            # DDR: flat arrows scroll UP from the bottom to the receptors at DDR_TOP.
+            scroll = DDR_H / max(0.1, LOOK["v"])         # ui-units/sec (Look -/+ sets speed)
+            for idx in range(lo, hi):
+                if k >= len(ddr_pool):
+                    break
+                n = notes[idx]
+                ao, a, hb = ddr_pool[k]; k += 1
+                lx = _lane_x(n[1])
+                y = DDR_TOP - (n[0] - t) * scroll        # future notes lower, rise to the top
+                rot = Vec3(0, 0, 0) if n[3] == DDR_MINE else _panel_rot(n[1])
+                a.enabled = True; a.position = (lx, y, 0.02); a.rotation = rot
+                ao.enabled = True; ao.position = (lx, y, 0.025); ao.rotation = rot   # outline behind
                 if n[3] == DDR_MINE:
-                    cube.color = C_BOMB; edge.enabled = False
-                    arr.enabled = False; dot.enabled = True; dot.color = E_RED
+                    a.color = C_BOMB; hb.enabled = False
                 else:
-                    qc = color.hex(n[5])                 # rhythm-subdivision colour
-                    cube.color = qc
-                    edge.enabled = True; edge.color = color.hex("#f2f6ff")
-                    v = CUTV.get(n[4])
-                    arr.enabled = True; dot.enabled = False; arr.color = ARROWC
-                    arr.rotation = Vec3(0, 0, math.degrees(math.atan2(-v[0], v[1])))
-                    if n[6] is not None:                 # freeze/roll body: head -> tail
-                        tz = (n[6] - t) * UPS
-                        length = max(0.05, tz - z)
-                        hold.enabled = True; hold.color = qc
-                        hold.scale = (NOTE * 0.42, NOTE * 0.42, length)
-                        hold.position = (nx, Y0 + n[2] * ROWH, z + length / 2)
-            else:
+                    a.color = color.hex(n[5])            # rhythm-subdivision colour
+                    if n[6] is not None:                 # freeze body: head -> tail (tail lower)
+                        ty = DDR_TOP - (n[6] - t) * scroll
+                        top_y = min(y, DDR_TOP)
+                        length = max(0.01, top_y - ty)
+                        hb.enabled = True; hb.color = color.hex(n[5])
+                        hb.scale = (DDR_ARR * 0.34, length)   # thinner tail
+                        hb.position = (lx, (top_y + ty) / 2, 0.035)
+                    else:
+                        hb.enabled = False
+            for j in range(k, len(ddr_pool)):
+                if ddr_pool[j][1].enabled:
+                    ddr_pool[j][0].enabled = ddr_pool[j][1].enabled = ddr_pool[j][2].enabled = False
+        else:
+            # Beat Saber: lit 3D blocks fly at the camera.
+            for idx in range(lo, hi):
+                if k >= len(pool):
+                    break
+                n = notes[idx]; z = (n[0] - t) * UPS
+                cube, edge, arr, dot, shadow, hold = pool[k]; k += 1
+                nx = (n[1] - 1.5) * COLW
+                cube.enabled = True
+                cube.position = (nx, Y0 + n[2] * ROWH, z)
+                shadow.enabled = True
+                shadow.position = (nx, ROADY + 0.014, z)
                 hold.enabled = False
                 typ = n[3]
                 if typ == BOMB:
@@ -917,15 +999,14 @@ def run(folder, want_diff, mode="bs"):
                         arr.rotation = Vec3(0, 0, math.degrees(math.atan2(-v[0], v[1])))
                     else:
                         arr.enabled = False; dot.enabled = True; dot.color = ARROWC
-        for j in range(k, len(pool)):
-            if pool[j][0].enabled:
-                pool[j][0].enabled = False
-                pool[j][4].enabled = False              # its road shadow too
-                pool[j][5].enabled = False              # its hold body too
-
-        span = SN * SGAP                          # scroll the road speed-stripes at you
-        for i, s in enumerate(stripes):
-            s.z = (i * SGAP - t * UPS) % span
+            for j in range(k, len(pool)):
+                if pool[j][0].enabled:
+                    pool[j][0].enabled = False
+                    pool[j][4].enabled = False              # its road shadow too
+                    pool[j][5].enabled = False              # its hold body too
+            span = SN * SGAP                          # scroll the road speed-stripes at you
+            for i, s in enumerate(stripes):
+                s.z = (i * SGAP - t * UPS) % span
 
         if drag["on"] and held_keys["left mouse"]:
             bar_seek()

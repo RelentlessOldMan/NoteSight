@@ -154,19 +154,17 @@ def _assemble_notes(spec, analysis, diff, bpm, beat0, onsets):
     # such jump back to a single. Jump RUNS (jump->jump) are untouched; only jump->tight-single
     # is fixed. Distinct note TIMES are unchanged, so the Beat Saber re-voicer is unaffected.
     notes = _clean_jumps(notes, bpm, beat0, spec.max_subdivision,
-                         spec.allow_triplets, diff.max_jump_run)
+                         spec.allow_triplets, diff.jump_gap_beats)
     return notes
 
 
-def _clean_jumps(notes, bpm, beat0, sub, trip, cap, tight_beats=0.55):
-    """Demote a jump (>=2 notes at one time) to a single when it has an awkward tight single
-    neighbour that survived chorus-copy + grid snap:
-      * EXIT  -- a lone single within an 8th right AFTER (land both feet, peel one off fast).
-      * ENTRY -- a tight single right BEFORE, if it's a LONE single (space->single->jump) or
-                 if the tier is low (cap < 3, no stream-into-jump). A real stream into a jump
-                 (>=2 tight notes) on Medium+ is fine and kept.
-    Decided on the SNAPPED grid the chart actually plays on. Distinct note TIMES are unchanged
-    (a jump loses one of two same-time notes), so the Beat Saber re-voicer is unaffected."""
+def _clean_jumps(notes, bpm, beat0, sub, trip, jump_gap_beats=0.55):
+    """Demote a jump (>=2 notes at one time) to a single when a SINGLE neighbour sits closer than
+    jump_gap_beats -- the tier's minimum jump-transition room (a quarter on mid/low tiers, an 8th
+    up high). Catches tight jump<->single transitions that chorus-copy + grid snap re-create;
+    jump<->jump runs are left intact. Decided on the SNAPPED grid the chart actually plays on;
+    distinct note TIMES are unchanged (a jump loses one of two same-time notes), so the Beat Saber
+    re-voicer is unaffected."""
     if bpm <= 0 or len(notes) < 2:
         return notes
     snapped = snap_times([n.time for n in notes], bpm, beat0, sub, trip)
@@ -178,25 +176,20 @@ def _clean_jumps(notes, bpm, beat0, sub, trip, cap, tight_beats=0.55):
             groups[-1][1].append(i)
         else:
             groups.append((t, [i]))
-    allow_stream_entry = cap >= 3
-    tb = tight_beats
+    jg = jump_gap_beats
     drop = set()
     for gi, (t, idxs) in enumerate(groups):
         if len(idxs) < 2:
             continue                             # only jumps
         bad = False
-        # EXIT: next row is a lone single, tight
-        if gi + 1 < len(groups):
+        if gi + 1 < len(groups):                 # tight SINGLE right after
             nt, nidx = groups[gi + 1]
-            if len(nidx) == 1 and (nt - t) * bpm / 60.0 <= tb:
+            if len(nidx) == 1 and (nt - t) * bpm / 60.0 < jg - 1e-6:
                 bad = True
-        # ENTRY: prev row is a single, tight -> bad on low tiers, or if it's a lone single
-        if not bad and gi >= 1:
+        if not bad and gi >= 1:                  # tight SINGLE right before
             pt, pidx = groups[gi - 1]
-            if len(pidx) == 1 and (t - pt) * bpm / 60.0 <= tb:
-                lone = gi - 2 < 0 or (pt - groups[gi - 2][0]) * bpm / 60.0 > tb
-                if not allow_stream_entry or lone:
-                    bad = True
+            if len(pidx) == 1 and (t - pt) * bpm / 60.0 < jg - 1e-6:
+                bad = True
         if bad:
             for j in sorted(idxs)[1:]:           # keep the alternation lane, drop the partner
                 drop.add(j)
