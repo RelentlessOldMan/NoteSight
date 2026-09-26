@@ -135,6 +135,18 @@ def _rows_beatsaber(song_dir: str) -> list[dict]:
     return out
 
 
+def _load_ratings(pack_dir: str) -> dict:
+    """Optional: read ratings.json (written by the private score_pack.py) -> {'song|cat': {...}}.
+    Absent for anyone without the local evaluators; the manifest just omits the columns then."""
+    p = os.path.join(pack_dir, "ratings.json")
+    if not os.path.isfile(p):
+        return {}
+    try:
+        return (json.load(open(p, encoding="utf-8")) or {}).get("ratings", {})
+    except Exception:
+        return {}
+
+
 def scan_pack(pack_dir: str) -> tuple[list[dict], str]:
     """Return (rows, format) for every song folder under pack_dir. Each row already
     carries song/bpm/cat + metrics; we add the # after global ordering."""
@@ -148,6 +160,9 @@ def scan_pack(pack_dir: str) -> tuple[list[dict], str]:
         elif os.path.isfile(os.path.join(d, "info.dat")) or os.path.isfile(os.path.join(d, "Info.dat")):
             fmt = fmt or "Beat Saber"
             rows += _rows_beatsaber(d)
+    ratings = _load_ratings(pack_dir)            # merge cached BeatLeader/flow numbers if present
+    for r in rows:
+        r.update(ratings.get(f"{r['song']}|{r['cat']}", {}))
     for i, r in enumerate(rows, 1):
         r["idx"] = i
     return rows, fmt or "pack"
@@ -164,16 +179,31 @@ COLS = [
     ("avg_npm", "avg notes/min", "num"),
     ("peak_npm", "peak notes/min", "num"),
 ]
+# BeatLeader rating + flow columns -- only shown when a pack carries ratings.json (Beat Saber).
+RATING_COLS = [
+    ("bl_star", "BL star", "num"),
+    ("bl_pass", "pass", "num"),
+    ("bl_tech", "tech", "num"),
+    ("bl_acc", "acc", "num"),
+    ("reset_pct", "reset %", "num"),
+]
+
+
+def _columns(rows: list[dict]) -> list[tuple]:
+    """Base columns, plus any rating columns that at least one row actually has."""
+    extra = [c for c in RATING_COLS if any(c[0] in r for r in rows)]
+    return COLS + extra
 
 
 def render_html(title: str, fmt: str, rows: list[dict]) -> str:
     n_songs = len({r["song"] for r in rows})
+    cols = _columns(rows)
     head = "".join(
         f'<th data-k="{k}" data-t="{t}">{html.escape(lbl)}<span class="ar"></span></th>'
-        for k, lbl, t in COLS)
+        for k, lbl, t in cols)
     body = []
     for r in rows:
-        tds = "".join(f'<td class="{t}">{html.escape(str(r[k]))}</td>' for k, _, t in COLS)
+        tds = "".join(f'<td class="{t}">{html.escape(str(r.get(k, "")))}</td>' for k, _, t in cols)
         body.append(f"<tr>{tds}</tr>")
     body = "\n".join(body)
     return _TEMPLATE.format(
