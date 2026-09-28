@@ -189,15 +189,23 @@ RATING_COLS = [
 ]
 
 
-def _columns(rows: list[dict]) -> list[tuple]:
-    """Base columns, plus any rating columns that at least one row actually has."""
-    extra = [c for c in RATING_COLS if any(c[0] in r for r in rows)]
+def _columns(rows: list[dict], ratings: str = "full") -> list[tuple]:
+    """Base columns, plus rating columns per `ratings` mode: "full" = every rating column present
+    in the data, "star" = just the headline BL star (for the public site), "none" = base only.
+    A column is only added if at least one row actually carries it."""
+    if ratings == "none":
+        wanted = []
+    elif ratings == "star":
+        wanted = [c for c in RATING_COLS if c[0] == "bl_star"]
+    else:
+        wanted = RATING_COLS
+    extra = [c for c in wanted if any(c[0] in r for r in rows)]
     return COLS + extra
 
 
-def render_html(title: str, fmt: str, rows: list[dict]) -> str:
+def render_html(title: str, fmt: str, rows: list[dict], ratings: str = "full") -> str:
     n_songs = len({r["song"] for r in rows})
-    cols = _columns(rows)
+    cols = _columns(rows, ratings)
     head = "".join(
         f'<th data-k="{k}" data-t="{t}">{html.escape(lbl)}<span class="ar"></span></th>'
         for k, lbl, t in cols)
@@ -285,7 +293,7 @@ _TEMPLATE = r"""<!doctype html>
 """
 
 
-def write_manifest(pack_dir: str, out_path: str = "", title: str = "") -> str:
+def write_manifest(pack_dir: str, out_path: str = "", title: str = "", ratings: str = "full") -> str:
     rows, fmt = scan_pack(pack_dir)
     if not rows:
         raise SystemExit(f"no songs found in {pack_dir}")
@@ -293,13 +301,14 @@ def write_manifest(pack_dir: str, out_path: str = "", title: str = "") -> str:
     if not out_path:
         out_path = os.path.join(pack_dir, "songs.html")
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(render_html(title, fmt, rows))
+        f.write(render_html(title, fmt, rows, ratings))
     return out_path
 
 
 def main(argv) -> int:
     argv = list(argv)
     title = out = ""
+    ratings = "full"
     rest = []
     i = 0
     while i < len(argv):
@@ -308,13 +317,15 @@ def main(argv) -> int:
             i += 1; title = argv[i]
         elif a in ("-o", "--out"):
             i += 1; out = argv[i]
+        elif a == "--ratings":            # full | star | none  (star = BL star only, for the site)
+            i += 1; ratings = argv[i]
         else:
             rest.append(a)
         i += 1
     if not rest:
         print(__doc__)
         return 2
-    p = write_manifest(rest[0], out, title)
+    p = write_manifest(rest[0], out, title, ratings)
     rows, _ = scan_pack(rest[0])
     print(f"wrote {p}  ({len(rows)} charts)")
     return 0
