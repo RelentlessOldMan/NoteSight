@@ -210,6 +210,71 @@ def save_png(src: str, dst: str) -> None:
         shutil.copyfile(src, dst)
 
 
+# StepMania uses ONE source image in two very differently-shaped slots, so a square cover looks
+# wrong in both: #BANNER is a wide strip (wheel + evaluation screen) -> a square gets stretched
+# (squished); #BACKGROUND is fullscreen 16:9 -> a square is cropped top/bottom (chopped heads).
+# So write each slot at its own aspect via a COVER-crop biased toward the TOP (keeps faces/heads):
+# take less off the top than the bottom. BANNER ~2.5:1, BACKGROUND 16:9.
+BANNER_RATIO = 2.5
+BG_RATIO = 16 / 9
+_TOP_BIAS = 0.28   # fraction of the vertical excess removed from the TOP (0=flush top, .5=center, 1=flush bottom)
+# Per-song vertical framing overrides (keyed by song stem), from playtest eyeballing. Most art frames
+# fine at the default; these subjects sit unusually high (keep the top -> low bias) or low (keep the
+# bottom -> high bias) so the default crop clipped a head or the subject.
+ART_TOP_BIAS = {
+    "Looksmaxxed":            0.08,   # subject high -> keep the top
+    "Second Choice":          0.08,
+    "Thorn and Fang":         0.08,
+    "County Fair":            0.85,   # subject low -> keep the bottom
+    "Ribbons in the Night":   0.85,
+    "Where the Cornfield Was": 0.85,
+}
+
+
+def _cover_crop(im, ratio: float, top_bias: float = _TOP_BIAS):
+    """Crop `im` to width:height == ratio, cover-fit, biased vertically by top_bias
+    (0=flush top, .5=center, 1=flush bottom)."""
+    w, h = im.size
+    crop_w, crop_h = w, round(w / ratio)
+    if crop_h > h:                       # target taller than source: crop width instead
+        crop_h, crop_w = h, round(h * ratio)
+    left = (w - crop_w) // 2
+    top = round((h - crop_h) * top_bias)
+    return im.crop((left, top, left + crop_w, top + crop_h))
+
+
+def save_banner(src: str, dst: str, top_bias: float = _TOP_BIAS) -> None:
+    try:
+        from PIL import Image
+        _cover_crop(Image.open(src).convert("RGB"), BANNER_RATIO, top_bias).save(dst, "PNG")
+    except Exception:
+        save_png(src, dst)
+
+
+def save_background(src: str, dst: str, top_bias: float = _TOP_BIAS) -> None:
+    try:
+        from PIL import Image
+        _cover_crop(Image.open(src).convert("RGB"), BG_RATIO, top_bias).save(dst, "PNG")
+    except Exception:
+        save_png(src, dst)
+
+
+def _copy_lrc(src: str, dst: str) -> None:
+    """Copy an .lrc, dropping section-marker lines like '[00:14.38]-- Verse 1 --'. Each marker
+    shares its timestamp with the next real lyric, so StepMania's karaoke highlight has zero
+    duration on the marker and FLASHES/restarts onto the lyric at every section. The marker isn't
+    a lyric anyway, so nothing sung is lost."""
+    import re
+    out = []
+    for line in open(src, encoding="utf-8", errors="replace"):
+        m = re.match(r"^\s*\[\d+:\d+(?:\.\d+)?\]\s*(.*?)\s*$", line)
+        if m and m.group(1).startswith("--"):
+            continue
+        out.append(line)
+    with open(dst, "w", encoding="utf-8", newline="") as f:
+        f.writelines(out)
+
+
 def render_tier(analysis, preset: str, slot: str, bpm, beat0, duration):
     """Chart one difficulty -> (meter, radar, body_str, steps, nps). steps/nps are the
     FINAL .sm step count and its density over the note span (what actually plays)."""
@@ -355,14 +420,15 @@ def build_song(audio_path: str, out_group: str, title_override: str = "",
             banner_name, bg_name = safe + ".png", safe + "-bg.png"
             # Save REAL PNGs -- the source art is often JPEG-with-a-.png-name,
             # which makes StepMania log "is really jpeg" + cache warnings.
-            save_png(art, os.path.join(song_dir, banner_name))
-            save_png(art, os.path.join(song_dir, bg_name))
+            bias = ART_TOP_BIAS.get(stem, _TOP_BIAS)
+            save_banner(art, os.path.join(song_dir, banner_name), bias)      # ~2.5:1 wide strip
+            save_background(art, os.path.join(song_dir, bg_name), bias)      # 16:9 fullscreen
             banner_line = f"#BANNER:{banner_name};\n"
             bg_line = f"#BACKGROUND:{bg_name};\n"
         lrc = find_lrc(folder, stem)
         if lrc:
             lrc_name = safe + ".lrc"
-            shutil.copyfile(lrc, os.path.join(song_dir, lrc_name))
+            _copy_lrc(lrc, os.path.join(song_dir, lrc_name))
             lrc_line = f"#LYRICSPATH:{lrc_name};\n"
 
     # Music-wheel preview: start ~1/3 into the song (like Won't Stop's 34.25s),
