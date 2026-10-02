@@ -88,6 +88,15 @@ BS_DIFFICULTY = {
 # these are deliberately gentler for a casual, no-bar audience. (jump distance stays ~22-24 = readable.)
 BS_REACTION = {"Beginner": 1.2, "Easy": 1.1, "Medium": 1.0, "Hard": 0.9, "Challenge": 0.8}
 
+# END-OF-SONG GUARD. Beat Saber ends the level when the audio finishes, so a note in
+# the final moment is "seen but not sliceable" -- it flies in, the song stops, no hit.
+# Real maps leave a generous tail: across the 1300+ corpus the median gap (audio_end
+# minus last note) is ~4.7s, p1 is 0.64s, and only 0.5% of charts put a note within the
+# last 0.5s. We were crowding it (median ~1.4s, 30% under 1.0s, and a few notes landing
+# PAST the audio end after beat-grid snap -- e.g. Fireflies and Fae). Drop any note within
+# this many seconds of the audio end; the song's already fading, so it costs 1-2 onsets.
+TAIL_BUFFER_S = 1.0
+
 
 def jump_offset(njs, bpm, target_rt):
     """The _noteJumpStartBeatOffset (in beats) that lands the reaction window on `target_rt` seconds.
@@ -484,6 +493,12 @@ def write_pack(notes_by_diff: dict, meta: SongMeta, out_dir: str,
             bs_notes = notes                    # already letter-voiced BS _notes dicts
         else:
             bs_notes = to_bs_notes(notes, meta.bpm, meta.beat0, seed=meta.seed, **note_opts)
+        # END-OF-SONG GUARD: drop notes within TAIL_BUFFER_S of the audio end so none are
+        # "seen but not sliceable". _time is in beats; convert the buffer via the song BPM.
+        # (Lighting below is derived from the trimmed bs_notes, so it trims to match.)
+        if meta.duration and meta.bpm:
+            max_beat = (meta.duration - TAIL_BUFFER_S) * meta.bpm / 60.0
+            bs_notes = [n for n in bs_notes if n["_time"] <= max_beat]
         # Embed the generator version in the map itself. JSON has no comments, so we
         # tag it as top-level metadata AND inside _customData (the canonical spot the
         # game/editors preserve for custom fields) -- both are ignored by play.

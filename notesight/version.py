@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime
 import os
 
-BS_GEN_VERSION = "2026.9.15.0"    # Beat Saber -- no same-cut-twice (incl. horizontals + across stitch/tile SEAMS)
+BS_GEN_VERSION = "2026.10.2.0"    # Beat Saber -- end-of-song tail guard (TAIL_BUFFER_S=1.0): no "seen but not sliceable" last notes
 ITG_GEN_VERSION = "2026.9.10.0"   # ITG / StepMania -- regular top-two density ramp softened (Easy 2.0->2.2, Hard 4.5->4.0, Challenge 6.5->5.0)
 
 
