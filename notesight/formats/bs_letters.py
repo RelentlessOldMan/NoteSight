@@ -251,6 +251,23 @@ def _mined_doubles(rng, dbank):
     return out
 
 
+def _occludes(slots):
+    """A mined letter that OCCLUDES: one hand lives entirely on the OTHER hand's side (2+ blocks)
+    AND the figure passes through the centre-middle cell (cols 1-2, row 1) -- e.g. red windmilling
+    UL@2,1 / DR@3,0 on blue's side. Fine once in its source map, but a phrase repeats it all song
+    and the arm-across + vision-block combo hides what's coming (Brain Rot E+ 2026-10-06: 9.8%
+    vision / 38% crossover, past the real-map p95 on both). 88 of ~3.9k mined singles (2%)."""
+    blocks = [b for s in slots for b in s]
+    if not any(c in (1, 2) and r == 1 for _h, c, r, _cut in blocks):
+        return False
+    for hand in (0, 1):
+        hb = [b for b in blocks if b[0] == hand]
+        if len(hb) >= 2 and all((hand == 0 and c >= 2) or (hand == 1 and c <= 1)
+                                for _h, c, _r, _cut in hb):
+            return True
+    return False
+
+
 def pick_alphabet(seed, allow_dots=False):
     """A song's committed alphabet: a seeded subset of the MINED single bank (thousands of real
     single-runs) PLUS a seeded set of MINED double RUNS from the song's committed double families
@@ -265,8 +282,17 @@ def pick_alphabet(seed, allow_dots=False):
                      if L["cat"] == "single" and (allow_dots or not _has_dot(L["slots"]))]
     alpha = []
     if mined_singles:
-        alpha += [mined_singles[i] for i in
-                  rng.sample(range(len(mined_singles)), min(len(mined_singles), 16))]
+        picks = rng.sample(range(len(mined_singles)), min(len(mined_singles), 16))
+        # Swap out OCCLUDING letters AFTER sampling, with a SEPARATE rng, so a song that never
+        # drew one keeps its exact alphabet (and the main rng stream -> same doubles + shuffle).
+        if any(_occludes(mined_singles[i]) for i in picks):
+            swap = _random.Random(seed ^ 0x0CC1)
+            taken = set(picks)
+            pool = [i for i in range(len(mined_singles))
+                    if i not in taken and not _occludes(mined_singles[i])]
+            picks = [i if not _occludes(mined_singles[i]) else pool.pop(swap.randrange(len(pool)))
+                     for i in picks]
+        alpha += [mined_singles[i] for i in picks]
     alpha += _mined_doubles(rng, _load_doubles_bank())
     if not any(any(len(s) == 2 for s in L) for L in alpha):      # bank missing -> safe fallback
         alpha += rng.sample(_curated_singles(), min(3, len(_curated_singles())))
